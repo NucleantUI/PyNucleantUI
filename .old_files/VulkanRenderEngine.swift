@@ -1,0 +1,1411 @@
+//
+//  VulkanRenderEngine.swift
+//  SulphurXcodeDemo
+//
+//  Vulkan presentation engine that renders node slots into the CAMetalLayer
+//  of a SulphurNSView (via MoltenVK / VK_EXT_metal_surface).
+//
+//  Usage:
+//
+//      let engine = try VulkanRenderEngine.attached(to: sulphurView)
+//      let node   = try engine.makeThorNode(canvas: tvgCanvasHandle,
+//                                           width: 512, height: 512)
+//      engine.append(node)
+//      // append more nodes at any time — they join the composite next frame
+//
+import QuartzCore
+import SulphurVulkan
+import VulkanCore
+import CVulkan
+import SulphurCore
+import SulphurShader
+#if canImport(SulphurApplication)
+import SulphurApplication
+#endif
+
+
+// MARK: - Node type
+
+/// Concrete ThorVG GPU canvas — wraps the raw `Tvg_Canvas` handle. A class,
+/// not a struct: this is a reference to one live ThorVG canvas instance:
+/// its lifetime and identity must never be duplicated by value-copy.
+public final class ThorVulkanCanvas: ThorGPUCanvas {
+    public var base: Tvg_Canvas
+    public init(base: Tvg_Canvas) {
+        self.base = base
+    }
+}
+
+/// The engine's single node type: a ThorVG GPU canvas rendering into a
+/// VkImage, plus an optional compute shader post-process. Conforms to
+/// `VulkanThorRenderNode`, so it also works as the concrete `B` of
+/// `RenderNodeEnum` / `renderFrame`.
+public final class ThorShaderNode: VulkanThorRenderNode {
+
+    public var canvas: ThorVulkanCanvas
+    public let width:  UInt32
+    public let height: UInt32
+
+    public let image:                VkImage
+    public let imageView:            VkImageView
+    public var computePipeline:      VkPipeline?
+    public var computeLayout:        VkPipelineLayout?
+    public var computeDescriptorSet: VkDescriptorSet?
+    public var dirty:                Bool = true
+
+    /// True when `image` is imported external memory (e.g. a Metal texture
+    /// another API rendered into via VK_EXT_metal_objects) rather than an
+    /// image this engine itself drew into. Only affects the very first
+    /// barrier: such an image starts life in GENERAL (set at import time),
+    /// not COLOR_ATTACHMENT_OPTIMAL, and GENERAL is safe as a source for
+    /// any prior access without permitting the driver to discard content.
+    public let isExternallyBacked: Bool
+
+    /// True when `image` was created with STORAGE usage (and, for imported
+    /// Metal textures, the underlying MTLTexture has shaderWrite), so a
+    /// compute post shader may bind it as a storage image. Canvas post
+    /// shaders check this before building their pipeline.
+    public let storageCapable: Bool
+
+    /// The image's actual current Vulkan-tracked layout, updated after
+    /// every barrier `update(_:cmd:)` records. Barriers must declare the
+    /// layout the image is *really* in — declaring a stale one (e.g.
+    /// re-asserting the import-time GENERAL on frame 2, when the previous
+    /// barrier already moved it to SHADER_READ_ONLY_OPTIMAL) is exactly the
+    /// oldLayout/actual-layout mismatch that lets a driver skip or
+    /// mis-schedule the cache operations a transition depends on.
+    var currentLayout: VkImageLayout
+
+    /// For externally-backed nodes: blocks until the writer's GPU queue has
+    /// actually finished, not just submitted, its work. `tvg_canvas_sync()`
+    /// only proves ThorVG's blit was *queued* on wgpu-native's Metal queue
+    /// (`wgpuQueueSubmit` is fire-and-forget, no fence) — without this,
+    /// Vulkan's composite pass can read the shared image before Metal's
+    /// GPU has actually written to it: two independent queues racing on
+    /// the same memory with nothing ordering them.
+    public var waitForExternalCompletion: (() -> Void)?
+
+    public init(
+        canvas:               ThorVulkanCanvas,
+        width:                UInt32,
+        height:               UInt32,
+        image:                VkImage,
+        imageView:            VkImageView,
+        isExternallyBacked:   Bool              = false,
+        storageCapable:       Bool              = false,
+        computePipeline:      VkPipeline?       = nil,
+        computeLayout:        VkPipelineLayout? = nil,
+        computeDescriptorSet: VkDescriptorSet?  = nil
+    ) {
+        self.canvas               = canvas
+        self.width                = width
+        self.height               = height
+        self.image                = image
+        self.imageView            = imageView
+        self.isExternallyBacked   = isExternallyBacked
+        self.storageCapable       = storageCapable
+        self.currentLayout        = isExternallyBacked ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        self.computePipeline      = computePipeline
+        self.computeLayout        = computeLayout
+        self.computeDescriptorSet = computeDescriptorSet
+    }
+}
+
+public final class GroupNode {
+    var nodes: [ThorShaderNode]
+    
+    init(nodes: [ThorShaderNode]) {
+        self.nodes = nodes
+    }
+}
+
+public enum TestRenderNodeEnum {
+    case node(ThorShaderNode)
+    case group(GroupNode)
+}
+
+public enum VulkanEngineError: Error {
+    case instance(Int32)
+    case surface(Int32)
+    case noPhysicalDevice
+    case noPresentQueue
+    case device(Int32)
+    case commandPool
+    case descriptorPool
+    case swapchain(Int32)
+    case renderPass
+    case framebuffer
+    case shaderCompile
+    case sync
+    case image
+    case memory
+}
+
+
+// MARK: - Engine
+
+/// Owns the whole present stack: instance → Metal surface → device → swapchain
+/// → composite pass. Each frame it updates dirty nodes (ThorVG draw / compute
+/// dispatch + layout barriers) and blends every published node's image onto
+/// the swapchain with the alpha-blending `CompositePipeline`.
+public final class VulkanRenderEngine: VulkanContext {
+
+    // MARK: VulkanContext
+
+    public let device:         VkDevice
+    public let physicalDevice: VkPhysicalDevice
+    public let descriptorPool: VkDescriptorPool
+    /// Frames in flight — per-image resources (uniform buffers, descriptor
+    /// sets) allocated against this context should be indexed by `frameIndex`.
+    public let imageCount: Int
+
+    // MARK: Core objects
+
+    public let instance:         VkInstance
+    public let surface:          VkSurfaceKHR
+    public let graphicsQueue:    VkQueue
+    public let queueFamilyIndex: UInt32
+    public let commandPool:      VkCommandPool
+    public let metalLayer:       CAMetalLayer
+
+    // MARK: Nodes
+
+    /// The slots composited each frame, in array order (later = on top).
+    public var nodes: [TestRenderNodeEnum] = []
+
+    public func append(_ node: TestRenderNodeEnum) {
+        nodes.append(node)
+    }
+
+    /// Removes a single node from the composite list — e.g. when the widget
+    /// owning it is dropped from the tree, so a stale image doesn't keep
+    /// drawing every frame. Groups aren't addressed by this (nothing builds
+    /// one yet).
+    public func remove(_ node: ThorShaderNode) {
+        let id = ObjectIdentifier(node)
+        nodes.removeAll { entry in
+            if case .node(let n) = entry { return ObjectIdentifier(n) == id }
+            return false
+        }
+        nodeSets.removeValue(forKey: id)
+        if let pool = nodeDescriptorPools.removeValue(forKey: id) {
+            vkDestroyDescriptorPool(device, pool, nil)
+        }
+        readable.remove(id)
+        warnedFailedNodes.remove(id)
+    }
+
+    /// Called at the start of every frame with Δt — mutate nodes / set `dirty`
+    /// here to drive animation.
+    public var onUpdate: ((Double) -> Void)?
+
+    /// Seconds accumulated across frames.
+    public private(set) var elapsed: Double = 0
+
+    /// Frame-in-flight cursor, cycles 0..<imageCount.
+    public private(set) var frameIndex: Int = 0
+
+    public var clearColor: (r: Float, g: Float, b: Float, a: Float) = (0.02, 0.02, 0.04, 1.0)
+
+    // MARK: Private state
+
+    private static var maxFrames: Int { 2 }
+    private let colorFormat = VK_FORMAT_B8G8R8A8_UNORM
+
+    private var renderPass:      VkRenderPass?
+    private var swapchain:       VkSwapchainKHR?
+    private var swapchainImages: [VkImage?]       = []
+    private var swapchainViews:  [VkImageView?]   = []
+    private var framebuffers:    [VkFramebuffer?] = []
+    private var extent = VkExtent2D(width: 0, height: 0)
+
+    private var composite: CompositePipeline!
+
+    private var commandBuffers: [VkCommandBuffer?] = []
+    private var imageAvailable: [VkSemaphore?]     = []
+    private var renderFinished: [VkSemaphore?]     = []
+    private var inFlight:       [VkFence?]         = []
+
+    /// Descriptor set per node (keyed by identity) — image views are stable
+    /// for a node's lifetime, so one set-update at creation is enough. Each
+    /// set gets its own dedicated pool (see `allocateNodeDescriptorSet`) so
+    /// MoltenVK never has to pack multiple same-layout sets from one pool —
+    /// doing so misaligns every other set's Metal argument-buffer offset.
+    private var nodeSets: [ObjectIdentifier: VkDescriptorSet] = [:]
+    private var nodeDescriptorPools: [ObjectIdentifier: VkDescriptorPool] = [:]
+    /// Nodes whose image currently sits in SHADER_READ_ONLY_OPTIMAL.
+    private var readable: Set<ObjectIdentifier> = []
+    /// Nodes we've already logged a draw failure for — ThorVG's Canvas
+    /// legitimately (and permanently) returns InsufficientCondition from a
+    /// canvas nothing was ever painted into (e.g. a container widget whose
+    /// on_canvas only holds children), so this is expected steady-state for
+    /// some nodes, not a transient error worth repeating every frame.
+    private var warnedFailedNodes: Set<ObjectIdentifier> = []
+
+    // MARK: - Init
+
+    public init(metalLayer: CAMetalLayer) throws {
+        self.metalLayer = metalLayer
+        self.imageCount = Self.maxFrames
+
+        // --- Instance with surface extensions -------------------------------
+        let availableInstanceExts = enumerateInstanceExtensions()
+        var instanceExtensions = ["VK_KHR_surface", "VK_EXT_metal_surface"]
+        if availableInstanceExts.contains("VK_KHR_get_physical_device_properties2") {
+            instanceExtensions.append("VK_KHR_get_physical_device_properties2")
+        }
+        var instanceFlags: VkInstanceCreateFlags = 0
+        if availableInstanceExts.contains("VK_KHR_portability_enumeration") {
+            instanceExtensions.append("VK_KHR_portability_enumeration")
+            instanceFlags = VkInstanceCreateFlags(0x00000001) // ENUMERATE_PORTABILITY_BIT_KHR
+        }
+
+        var createdInstance: VkInstance?
+        var appInfo = VkApplicationInfo()
+        appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO
+        appInfo.apiVersion = (1 << 22) | (2 << 12) // Vulkan 1.2
+        let instResult: VkResult = withUnsafePointer(to: &appInfo) { appPtr in
+            withCStringArray(instanceExtensions) { extPtr, extCount in
+                var ci = VkInstanceCreateInfo()
+                ci.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO
+                ci.flags = instanceFlags
+                ci.pApplicationInfo = appPtr
+                ci.enabledExtensionCount = extCount
+                ci.ppEnabledExtensionNames = extPtr
+                return vkCreateInstance(&ci, nil, &createdInstance)
+            }
+        }
+        guard instResult == VK_SUCCESS, let instance = createdInstance else {
+            throw VulkanEngineError.instance(instResult.rawValue)
+        }
+        self.instance = instance
+
+        // --- VkSurface from the CAMetalLayer ---------------------------------
+        // VkMetalSurfaceCreateInfoEXT doesn't import into Swift (its ObjC
+        // pLayer field makes the struct non-trivial under ARC), so lay the
+        // 32-byte struct out by hand: sType@0, pNext@8, flags@16, pLayer@24.
+        var createdSurface: VkSurfaceKHR?
+        let surfaceInfo = UnsafeMutableRawPointer.allocate(
+            byteCount: 32,
+            alignment: MemoryLayout<UInt>.alignment
+        )
+        defer { surfaceInfo.deallocate() }
+        surfaceInfo.initializeMemory(as: UInt8.self, repeating: 0, count: 32)
+        surfaceInfo.storeBytes(
+            of: VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT.rawValue,
+            toByteOffset: 0,
+            as: UInt32.self
+        )
+        surfaceInfo.storeBytes(
+            of: UInt(bitPattern: Unmanaged.passUnretained(metalLayer).toOpaque()),
+            toByteOffset: 24,
+            as: UInt.self
+        )
+        let surfResult = vkCreateMetalSurfaceEXT(
+            instance,
+            OpaquePointer(surfaceInfo),
+            nil,
+            &createdSurface
+        )
+        guard surfResult == VK_SUCCESS, let surface = createdSurface else {
+            throw VulkanEngineError.surface(surfResult.rawValue)
+        }
+        self.surface = surface
+
+        // --- Physical device --------------------------------------------------
+        var gpuCount: UInt32 = 0
+        vkEnumeratePhysicalDevices(instance, &gpuCount, nil)
+        guard gpuCount > 0 else { throw VulkanEngineError.noPhysicalDevice }
+        var gpus = [VkPhysicalDevice?](repeating: nil, count: Int(gpuCount))
+        vkEnumeratePhysicalDevices(instance, &gpuCount, &gpus)
+        guard let gpu = gpus.compactMap({ $0 }).first else {
+            throw VulkanEngineError.noPhysicalDevice
+        }
+        self.physicalDevice = gpu
+
+        // --- Queue family: graphics + compute + present ----------------------
+        var familyCount: UInt32 = 0
+        vkGetPhysicalDeviceQueueFamilyProperties(gpu, &familyCount, nil)
+        var families = [VkQueueFamilyProperties](
+            repeating: VkQueueFamilyProperties(),
+            count: Int(familyCount)
+        )
+        vkGetPhysicalDeviceQueueFamilyProperties(gpu, &familyCount, &families)
+        let needed = VkQueueFlags(VK_QUEUE_GRAPHICS_BIT.rawValue | VK_QUEUE_COMPUTE_BIT.rawValue)
+        var pickedFamily: UInt32?
+        for (i, family) in families.enumerated() where (family.queueFlags & needed) == needed {
+            var presentable: VkBool32 = VK_FALSE
+            vkGetPhysicalDeviceSurfaceSupportKHR(gpu, UInt32(i), surface, &presentable)
+            if presentable == VK_TRUE {
+                pickedFamily = UInt32(i)
+                break
+            }
+        }
+        guard let familyIndex = pickedFamily else { throw VulkanEngineError.noPresentQueue }
+        self.queueFamilyIndex = familyIndex
+
+        // --- Device + queue ----------------------------------------------------
+        let availableDeviceExts = enumerateDeviceExtensions(gpu)
+        var deviceExtensions = ["VK_KHR_swapchain"]
+        if availableDeviceExts.contains("VK_KHR_portability_subset") {
+            deviceExtensions.append("VK_KHR_portability_subset")
+        }
+        if availableDeviceExts.contains("VK_EXT_metal_objects") {
+            deviceExtensions.append("VK_EXT_metal_objects")
+        }
+        var createdDevice: VkDevice?
+        var priority: Float = 1.0
+        let devResult: VkResult = withUnsafePointer(to: &priority) { priorityPtr in
+            var qci = VkDeviceQueueCreateInfo()
+            qci.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO
+            qci.queueFamilyIndex = familyIndex
+            qci.queueCount = 1
+            qci.pQueuePriorities = priorityPtr
+            return withUnsafePointer(to: &qci) { qciPtr in
+                withCStringArray(deviceExtensions) { extPtr, extCount in
+                    var dci = VkDeviceCreateInfo()
+                    dci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
+                    dci.queueCreateInfoCount = 1
+                    dci.pQueueCreateInfos = qciPtr
+                    dci.enabledExtensionCount = extCount
+                    dci.ppEnabledExtensionNames = extPtr
+                    return vkCreateDevice(gpu, &dci, nil, &createdDevice)
+                }
+            }
+        }
+        guard devResult == VK_SUCCESS, let device = createdDevice else {
+            throw VulkanEngineError.device(devResult.rawValue)
+        }
+        self.device = device
+
+        var queue: VkQueue?
+        vkGetDeviceQueue(device, familyIndex, 0, &queue)
+        guard let queue else { throw VulkanEngineError.noPresentQueue }
+        self.graphicsQueue = queue
+
+        // --- Command pool -------------------------------------------------------
+        var createdPool: VkCommandPool?
+        var poolInfo = VkCommandPoolCreateInfo()
+        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
+        poolInfo.flags = VkCommandPoolCreateFlags(VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT.rawValue)
+        poolInfo.queueFamilyIndex = familyIndex
+        guard vkCreateCommandPool(device, &poolInfo, nil, &createdPool) == VK_SUCCESS,
+              let pool = createdPool else {
+            throw VulkanEngineError.commandPool
+        }
+        self.commandPool = pool
+
+        // --- Descriptor pool ------------------------------------------------------
+        self.descriptorPool = try makeEngineDescriptorPool(device: device, maxSets: 256)
+
+        // All stored lets are set — instance methods are usable from here on.
+        try createRenderPass()
+        try createSyncObjects()
+        try createCompositePipeline()
+        // Tolerate a zero-sized layer at init; drawFrame retries until it has
+        // a real drawable size (SulphurNSView sets it in setFrameSize).
+        try? createSwapchain()
+    }
+
+    deinit {
+        vkDeviceWaitIdle(device)
+        for pool in nodeDescriptorPools.values { vkDestroyDescriptorPool(device, pool, nil) }
+        composite = nil   // destroys its pipeline/layouts before the device goes away
+        destroySwapchainObjects()
+        if let swapchain { vkDestroySwapchainKHR(device, swapchain, nil) }
+        for sem in imageAvailable where sem != nil { vkDestroySemaphore(device, sem, nil) }
+        for sem in renderFinished where sem != nil { vkDestroySemaphore(device, sem, nil) }
+        for fence in inFlight where fence != nil { vkDestroyFence(device, fence, nil) }
+        if let renderPass { vkDestroyRenderPass(device, renderPass, nil) }
+        vkDestroyDescriptorPool(device, descriptorPool, nil)
+        vkDestroyCommandPool(device, commandPool, nil)
+        vkDestroyDevice(device, nil)
+        vkDestroySurfaceKHR(instance, surface, nil)
+        vkDestroyInstance(instance, nil)
+    }
+
+    // MARK: - Frame
+
+    /// Render one frame. Wire this to `SulphurNSView.onFrame`.
+    ///
+    /// MoltenVK translates every Vulkan call here into autoreleased
+    /// Objective-C/Metal objects (command buffers, encoders, texture
+    /// views…). Without an explicit pool, a full frame's worth of them
+    /// piles up every call — this is the single busiest call site in the
+    /// app, so it owns its own drain rather than depending on the caller.
+    public func drawFrame(_ dt: Double = 0) {
+        autoreleasepool {
+            drawFrameUnpooled(dt)
+        }
+    }
+
+    private func drawFrameUnpooled(_ dt: Double) {
+        elapsed += dt
+        onUpdate?(dt)
+
+        ensureSwapchain()
+        guard let swapchain, !framebuffers.isEmpty else { return }
+
+        let frame = frameIndex
+        var fence = inFlight[frame]
+        vkWaitForFences(device, 1, &fence, VK_TRUE, UInt64.max)
+
+        var imageIndex: UInt32 = 0
+        let acquire = vkAcquireNextImageKHR(
+            device,
+            swapchain,
+            UInt64.max,
+            imageAvailable[frame],
+            nil,
+            &imageIndex
+        )
+        if acquire == VK_ERROR_OUT_OF_DATE_KHR {
+            recreateSwapchain()
+            return
+        }
+        guard acquire == VK_SUCCESS || acquire == VK_SUBOPTIMAL_KHR else { return }
+
+        vkResetFences(device, 1, &fence)
+
+        guard let cmd = commandBuffers[frame] else { return }
+        vkResetCommandBuffer(cmd, 0)
+        var begin = VkCommandBufferBeginInfo()
+        begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+        begin.flags = VkCommandBufferUsageFlags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT.rawValue)
+        vkBeginCommandBuffer(cmd, &begin)
+
+        // 1. Node content updates (outside the render pass).
+        for node in nodes {
+            switch node {
+            case .node(let thorShaderNode):
+                update(thorShaderNode, cmd: cmd)
+            case .group(let groupNode):
+                update(groupNode, cmd: cmd)
+            }
+        }
+
+        // 2. Composite every published node onto the swapchain image.
+        recordCompositePass(cmd: cmd, imageIndex: Int(imageIndex))
+
+        vkEndCommandBuffer(cmd)
+
+        // 3. Submit + present.
+        guard submit(cmd, frame: frame) == VK_SUCCESS else { return }
+        let present = presentFrame(imageIndex: imageIndex, frame: frame)
+        if present == VK_ERROR_OUT_OF_DATE_KHR || present == VK_SUBOPTIMAL_KHR {
+            recreateSwapchain()
+        }
+        frameIndex = (frameIndex + 1) % Self.maxFrames
+    }
+
+    // MARK: - Node updates
+    private func update(_ group: GroupNode, cmd: VkCommandBuffer) {
+        for node in group.nodes {
+            update(node, cmd: cmd)
+        }
+    }
+    /// Draw + sync the node's ThorVG canvas, then barrier the image
+    /// (optionally through the node's compute post-process) into
+    /// SHADER_READ_ONLY for the composite pass.
+    private func update(_ node: ThorShaderNode, cmd: VkCommandBuffer) {
+        let id = ObjectIdentifier(node)
+        guard node.dirty else { return }
+        let drawResult = node.canvas.draw()
+        let syncResult = drawResult == TVG_RESULT_SUCCESS ? node.canvas.sync() : drawResult
+        guard drawResult == TVG_RESULT_SUCCESS, syncResult == TVG_RESULT_SUCCESS else {
+            if warnedFailedNodes.insert(id).inserted {
+                print("VulkanRenderEngine: thor node \(id) failed rendering (draw: \(drawResult), sync: \(syncResult)) — logged once; this repeats every frame if nothing is ever painted into the node's canvas")
+            }
+            return
+        }
+        warnedFailedNodes.remove(id)
+        node.dirty = false
+        node.waitForExternalCompletion?()
+
+        // Barriers must declare the layout the image is *really* in right
+        // now — node.currentLayout, not an assumption. An externally-backed
+        // image's writer (Metal, via wgpu-native) never goes through our
+        // Vulkan command stream, so on its very first draw the only
+        // trustworthy claim is GENERAL (set at import time): valid as a
+        // source for any prior access, and — unlike UNDEFINED — never
+        // permits the driver to discard content. On every frame after
+        // that, currentLayout correctly reflects where the previous
+        // barrier below actually left it.
+        let priorLayout  = node.currentLayout
+        let priorAccess: VkAccessFlags = node.isExternallyBacked
+            ? VkAccessFlags(VK_ACCESS_MEMORY_WRITE_BIT.rawValue) | VkAccessFlags(VK_ACCESS_MEMORY_READ_BIT.rawValue)
+            : VkAccessFlags(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT.rawValue)
+
+        if let pipeline = node.computePipeline,
+           let layout   = node.computeLayout,
+           let ds       = node.computeDescriptorSet {
+
+            engineImageBarrier(
+                cmd,
+                image:     node.image,
+                srcLayout: priorLayout,
+                srcAccess: priorAccess,
+                srcStage:  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                dstLayout: VK_IMAGE_LAYOUT_GENERAL,
+                dstAccess: VkAccessFlags(VK_ACCESS_SHADER_READ_BIT.rawValue) | VkAccessFlags(VK_ACCESS_SHADER_WRITE_BIT.rawValue),
+                dstStage:  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            )
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline)
+            var descSet: VkDescriptorSet? = ds
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &descSet, 0, nil)
+            vkCmdDispatch(cmd, (node.width + 7) / 8, (node.height + 7) / 8, 1)
+            engineImageBarrier(
+                cmd,
+                image:     node.image,
+                srcLayout: VK_IMAGE_LAYOUT_GENERAL,
+                srcAccess: VkAccessFlags(VK_ACCESS_SHADER_WRITE_BIT.rawValue),
+                srcStage:  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                dstLayout: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                dstAccess: VkAccessFlags(VK_ACCESS_SHADER_READ_BIT.rawValue),
+                dstStage:  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+            )
+        } else {
+            engineImageBarrier(
+                cmd,
+                image:     node.image,
+                srcLayout: priorLayout,
+                srcAccess: priorAccess,
+                srcStage:  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                dstLayout: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                dstAccess: VkAccessFlags(VK_ACCESS_SHADER_READ_BIT.rawValue),
+                dstStage:  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+            )
+        }
+        node.currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        readable.insert(id)
+    }
+
+    // MARK: - Composite pass
+
+    private func recordCompositePass(cmd: VkCommandBuffer, imageIndex: Int) {
+        var clear = VkClearValue()
+        clear.color = VkClearColorValue(float32: clearColor)
+
+        withUnsafePointer(to: &clear) { clearPtr in
+            var info = VkRenderPassBeginInfo()
+            info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+            info.renderPass = renderPass
+            info.framebuffer = framebuffers[imageIndex]
+            info.renderArea = VkRect2D(offset: VkOffset2D(x: 0, y: 0), extent: extent)
+            info.clearValueCount = 1
+            info.pClearValues = clearPtr
+            vkCmdBeginRenderPass(cmd, &info, VK_SUBPASS_CONTENTS_INLINE)
+        }
+
+        let viewport = VkViewport(
+            x: 0, y: 0,
+            width:  Float(extent.width),
+            height: Float(extent.height),
+            minDepth: 0, maxDepth: 1
+        )
+        let scissor = VkRect2D(offset: VkOffset2D(x: 0, y: 0), extent: extent)
+
+        for node in nodes {
+            switch node {
+            case .node(let thorShaderNode):
+                guard readable.contains(ObjectIdentifier(thorShaderNode)),
+                      let set = descriptorSet(for: thorShaderNode) else { continue }
+                composite.record(
+                    commandBuffer: cmd,
+                    descriptorSet: set,
+                    viewport:      viewport,
+                    scissor:       scissor
+                )
+            case .group(let groupNode):
+                continue
+            }
+        }
+
+        vkCmdEndRenderPass(cmd)
+    }
+
+    private func descriptorSet(for node: ThorShaderNode) -> VkDescriptorSet? {
+        let id = ObjectIdentifier(node)
+        if let set = nodeSets[id] { return set }
+        guard let allocated = try? composite.allocateNodeDescriptorSet() else { return nil }
+        composite.updateDescriptorSet(allocated.set, imageViews: [node.imageView])
+        nodeSets[id] = allocated.set
+        nodeDescriptorPools[id] = allocated.pool
+        return allocated.set
+    }
+
+    // MARK: - Submit / present
+
+    private func submit(_ cmd: VkCommandBuffer, frame: Int) -> VkResult {
+        var waitStage = VkPipelineStageFlags(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT.rawValue)
+        var waitSem   = imageAvailable[frame]
+        var signalSem = renderFinished[frame]
+        var cmdOpt: VkCommandBuffer? = cmd
+        return withUnsafePointer(to: &waitStage) { stagePtr in
+            withUnsafePointer(to: &waitSem) { waitPtr in
+                withUnsafePointer(to: &signalSem) { signalPtr in
+                    withUnsafePointer(to: &cmdOpt) { cmdPtr in
+                        var info = VkSubmitInfo()
+                        info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
+                        info.waitSemaphoreCount = 1
+                        info.pWaitSemaphores = waitPtr
+                        info.pWaitDstStageMask = stagePtr
+                        info.commandBufferCount = 1
+                        info.pCommandBuffers = cmdPtr
+                        info.signalSemaphoreCount = 1
+                        info.pSignalSemaphores = signalPtr
+                        return vkQueueSubmit(graphicsQueue, 1, &info, inFlight[frame])
+                    }
+                }
+            }
+        }
+    }
+
+    private func presentFrame(imageIndex: UInt32, frame: Int) -> VkResult {
+        var waitSem = renderFinished[frame]
+        var swap    = swapchain
+        var index   = imageIndex
+        return withUnsafePointer(to: &waitSem) { semPtr in
+            withUnsafePointer(to: &swap) { swapPtr in
+                withUnsafePointer(to: &index) { indexPtr in
+                    var info = VkPresentInfoKHR()
+                    info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR
+                    info.waitSemaphoreCount = 1
+                    info.pWaitSemaphores = semPtr
+                    info.swapchainCount = 1
+                    info.pSwapchains = swapPtr
+                    info.pImageIndices = indexPtr
+                    return vkQueuePresentKHR(graphicsQueue, &info)
+                }
+            }
+        }
+    }
+
+    // MARK: - Render pass / composite pipeline
+
+    private func createRenderPass() throws {
+        var color = VkAttachmentDescription()
+        color.format         = colorFormat
+        color.samples        = VK_SAMPLE_COUNT_1_BIT
+        color.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR
+        color.storeOp        = VK_ATTACHMENT_STORE_OP_STORE
+        color.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE
+        color.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE
+        color.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED
+        color.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+
+        var colorRef = VkAttachmentReference(
+            attachment: 0,
+            layout: VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        )
+
+        let result: VkResult = withUnsafePointer(to: &colorRef) { refPtr in
+            var subpass = VkSubpassDescription()
+            subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS
+            subpass.colorAttachmentCount = 1
+            subpass.pColorAttachments = refPtr
+
+            var dependency = VkSubpassDependency()
+            dependency.srcSubpass = UInt32.max // VK_SUBPASS_EXTERNAL
+            dependency.dstSubpass = 0
+            dependency.srcStageMask = VkPipelineStageFlags(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT.rawValue)
+            dependency.srcAccessMask = 0
+            dependency.dstStageMask = VkPipelineStageFlags(VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT.rawValue)
+            dependency.dstAccessMask = VkAccessFlags(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT.rawValue)
+
+            return withUnsafePointer(to: &color) { attPtr in
+                withUnsafePointer(to: &subpass) { subPtr in
+                    withUnsafePointer(to: &dependency) { depPtr in
+                        var info = VkRenderPassCreateInfo()
+                        info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
+                        info.attachmentCount = 1
+                        info.pAttachments = attPtr
+                        info.subpassCount = 1
+                        info.pSubpasses = subPtr
+                        info.dependencyCount = 1
+                        info.pDependencies = depPtr
+                        return vkCreateRenderPass(device, &info, nil, &renderPass)
+                    }
+                }
+            }
+        }
+        guard result == VK_SUCCESS else { throw VulkanEngineError.renderPass }
+    }
+
+    /// One-slot composite: each node draws a fullscreen alpha-blended quad
+    /// sampling its own image, so slots can be appended without rebuilding
+    /// the pipeline.
+    private func createCompositePipeline() throws {
+        let fragmentSource = """
+        #version 450
+        layout(location = 0) in vec2 vTexCoord;
+        layout(location = 0) out vec4 fragColor;
+        layout(binding = 0) uniform sampler2D nodeImage;
+
+        void main() {
+            fragColor = texture(nodeImage, vTexCoord);
+        }
+        """
+        guard
+            let vertSPIRV = VKShaderCompiler.shared.getDefaultVertexSPIRV(),
+            let fragSPIRV = VKShaderCompiler.shared.compile(
+                source:   fragmentSource,
+                stage:    .fragment,
+                filename: "engine_composite.frag"
+            ),
+            let renderPass
+        else {
+            throw VulkanEngineError.shaderCompile
+        }
+        composite = try CompositePipeline(
+            context:    self,
+            slotCount:  1,
+            renderPass: renderPass,
+            vertSPIRV:  vertSPIRV,
+            fragSPIRV:  fragSPIRV
+        )
+    }
+
+    // MARK: - Swapchain
+
+    private func ensureSwapchain() {
+        let drawable = metalLayer.drawableSize
+        let width  = UInt32(max(drawable.width, 0))
+        let height = UInt32(max(drawable.height, 0))
+        if swapchain == nil {
+            try? createSwapchain()
+        } else if width > 0, height > 0, width != extent.width || height != extent.height {
+            recreateSwapchain()
+        }
+    }
+
+    private func recreateSwapchain() {
+        vkDeviceWaitIdle(device)
+        try? createSwapchain()
+    }
+
+    private func createSwapchain() throws {
+        var caps = VkSurfaceCapabilitiesKHR()
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &caps)
+
+        var newExtent = caps.currentExtent
+        if newExtent.width == UInt32.max {
+            let drawable = metalLayer.drawableSize
+            newExtent = VkExtent2D(
+                width:  UInt32(max(drawable.width, 1)),
+                height: UInt32(max(drawable.height, 1))
+            )
+        }
+        guard newExtent.width > 0, newExtent.height > 0 else {
+            throw VulkanEngineError.swapchain(0)
+        }
+
+        var count = caps.minImageCount + 1
+        if caps.maxImageCount > 0 { count = min(count, caps.maxImageCount) }
+
+        let oldSwapchain = swapchain
+        var newSwapchain: VkSwapchainKHR?
+        var info = VkSwapchainCreateInfoKHR()
+        info.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR
+        info.surface          = surface
+        info.minImageCount    = count
+        info.imageFormat      = colorFormat
+        info.imageColorSpace  = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
+        info.imageExtent      = newExtent
+        info.imageArrayLayers = 1
+        info.imageUsage       = VkImageUsageFlags(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue)
+        info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE
+        info.preTransform     = caps.currentTransform
+        info.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+        info.presentMode      = VK_PRESENT_MODE_FIFO_KHR
+        info.clipped          = VK_TRUE
+        info.oldSwapchain     = oldSwapchain
+        let result = vkCreateSwapchainKHR(device, &info, nil, &newSwapchain)
+        guard result == VK_SUCCESS, let created = newSwapchain else {
+            throw VulkanEngineError.swapchain(result.rawValue)
+        }
+
+        destroySwapchainObjects()
+        if let oldSwapchain { vkDestroySwapchainKHR(device, oldSwapchain, nil) }
+        swapchain = created
+        extent = newExtent
+
+        // Images
+        var imageTotal: UInt32 = 0
+        vkGetSwapchainImagesKHR(device, created, &imageTotal, nil)
+        var images = [VkImage?](repeating: nil, count: Int(imageTotal))
+        vkGetSwapchainImagesKHR(device, created, &imageTotal, &images)
+        swapchainImages = images
+
+        // Views + framebuffers
+        swapchainViews = try images.map { image in
+            var view: VkImageView?
+            var viewInfo = VkImageViewCreateInfo()
+            viewInfo.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+            viewInfo.image    = image
+            viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D
+            viewInfo.format   = colorFormat
+            viewInfo.subresourceRange = VkImageSubresourceRange(
+                aspectMask:     VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue),
+                baseMipLevel:   0, levelCount: 1,
+                baseArrayLayer: 0, layerCount: 1
+            )
+            guard vkCreateImageView(device, &viewInfo, nil, &view) == VK_SUCCESS else {
+                throw VulkanEngineError.swapchain(result.rawValue)
+            }
+            return view
+        }
+
+        framebuffers = try swapchainViews.map { view in
+            var framebuffer: VkFramebuffer?
+            var attachment: VkImageView? = view
+            let fbResult: VkResult = withUnsafePointer(to: &attachment) { attPtr in
+                var fbInfo = VkFramebufferCreateInfo()
+                fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
+                fbInfo.renderPass = renderPass
+                fbInfo.attachmentCount = 1
+                fbInfo.pAttachments = attPtr
+                fbInfo.width  = newExtent.width
+                fbInfo.height = newExtent.height
+                fbInfo.layers = 1
+                return vkCreateFramebuffer(device, &fbInfo, nil, &framebuffer)
+            }
+            guard fbResult == VK_SUCCESS else { throw VulkanEngineError.framebuffer }
+            return framebuffer
+        }
+    }
+
+    /// Destroys framebuffers + views. The swapchain handle itself is handled
+    /// by the caller (needed as `oldSwapchain` during recreation).
+    private func destroySwapchainObjects() {
+        for framebuffer in framebuffers where framebuffer != nil {
+            vkDestroyFramebuffer(device, framebuffer, nil)
+        }
+        framebuffers = []
+        for view in swapchainViews where view != nil {
+            vkDestroyImageView(device, view, nil)
+        }
+        swapchainViews = []
+        swapchainImages = []
+    }
+
+    // MARK: - Sync objects + command buffers
+
+    private func createSyncObjects() throws {
+        var allocInfo = VkCommandBufferAllocateInfo()
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+        allocInfo.commandPool = commandPool
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
+        allocInfo.commandBufferCount = UInt32(Self.maxFrames)
+        var buffers = [VkCommandBuffer?](repeating: nil, count: Self.maxFrames)
+        guard vkAllocateCommandBuffers(device, &allocInfo, &buffers) == VK_SUCCESS else {
+            throw VulkanEngineError.sync
+        }
+        commandBuffers = buffers
+
+        for _ in 0..<Self.maxFrames {
+            var semInfo = VkSemaphoreCreateInfo()
+            semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+            var available: VkSemaphore?
+            var finished:  VkSemaphore?
+            guard
+                vkCreateSemaphore(device, &semInfo, nil, &available) == VK_SUCCESS,
+                vkCreateSemaphore(device, &semInfo, nil, &finished)  == VK_SUCCESS
+            else {
+                throw VulkanEngineError.sync
+            }
+            imageAvailable.append(available)
+            renderFinished.append(finished)
+
+            var fenceInfo = VkFenceCreateInfo()
+            fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
+            fenceInfo.flags = VkFenceCreateFlags(VK_FENCE_CREATE_SIGNALED_BIT.rawValue)
+            var fence: VkFence?
+            guard vkCreateFence(device, &fenceInfo, nil, &fence) == VK_SUCCESS else {
+                throw VulkanEngineError.sync
+            }
+            inFlight.append(fence)
+        }
+    }
+}
+
+
+// MARK: - SulphurNSView attachment
+
+#if canImport(SulphurApplication) && os(macOS)
+public extension VulkanRenderEngine {
+    /// Build an engine on the view's CAMetalLayer and drive it from the
+    /// view's display link. Keep a strong reference to the returned engine.
+    static func attached(to view: SulphurNSView) throws -> VulkanRenderEngine {
+        let engine = try VulkanRenderEngine(metalLayer: view.metalLayer)
+        view.onFrame = { [weak engine] dt in
+            engine?.drawFrame(dt)
+        }
+        return engine
+    }
+}
+#endif
+
+
+// MARK: - Node factory
+
+extension VulkanRenderEngine {
+    /// Build a whole self-contained ThorVG render target: its own WGPUTexture,
+    /// a `Tvg_Canvas` targeting that texture, and its own `ThorShaderNode`
+    /// importing that texture's Metal memory as a VkImage — the same zero-copy
+    /// pattern the app's root render target uses. Callers append the returned
+    /// node into `nodes` themselves; this only builds it. Used to give every
+    /// widget in a tree its own composited slot instead of sharing one canvas.
+    /// Pass `adopting` to target a caller-owned canvas at the new texture
+    /// instead of creating one — the canvas instance the caller already
+    /// handed out (e.g. to Python) stays the one the node renders.
+    func makeWidgetNode(
+        wgpu:     WgpuContext,
+        width:    Int,
+        height:   Int,
+        adopting: Tvg_Canvas? = nil
+    ) -> (node: ThorShaderNode, texture: WGPUTexture)? {
+        guard let texture = wgpu.makeTargetTexture(width: width, height: height) else {
+            print("VulkanRenderEngine: wgpu target texture creation failed")
+            return nil
+        }
+        guard let mtlTexture = wgpu.nativeMetalTexture(of: texture) else {
+            print("VulkanRenderEngine: wgpuTextureGetNativeMetalTexture returned null")
+            return nil
+        }
+        guard let canvas = adopting ?? tvg_wgcanvas_create(TVG_ENGINE_OPTION_DEFAULT) else {
+            print("VulkanRenderEngine: tvg_wgcanvas_create failed")
+            return nil
+        }
+        // Storage (compute post shader) support needs both sides of the
+        // shared texture to agree: wgpu must have created the MTLTexture
+        // with shaderWrite, and MoltenVK must expose storage on linear
+        // BGRA8 images so the import below may carry STORAGE usage.
+        let storageCapable = wgpu.canvasStorageCapable && supportsLinearBgraStorage()
+        guard
+            let node = try? makeThorNode(
+                canvas: canvas,
+                importingMetalTexture: mtlTexture,
+                width: width,
+                height: height,
+                storageCapable: storageCapable
+            )
+        else {
+            print("VulkanRenderEngine: makeThorNode(importingMetalTexture:) failed")
+            return nil
+        }
+
+        let target = tvg_wgcanvas_set_target(
+            canvas,
+            UnsafeMutableRawPointer(wgpu.device),
+            UnsafeMutableRawPointer(wgpu.instance),
+            UnsafeMutableRawPointer(texture),
+            UInt32(width),
+            UInt32(height),
+            TVG_COLORSPACE_ABGR8888S,
+            1
+        )
+        guard target == TVG_RESULT_SUCCESS else {
+            print("VulkanRenderEngine: tvg_wgcanvas_set_target failed (\(target))")
+            return nil
+        }
+
+        // Same fire-and-forget caveat as the root target: wgpuQueueSubmit
+        // only proves ThorVG's blit was queued, not finished.
+        node.waitForExternalCompletion = { [wgpu] in
+            wgpu.waitForGPUCompletion()
+        }
+
+        return (node, texture)
+    }
+
+    /// Create the VkImage a ThorVG canvas renders into and wrap everything
+    /// into a `ThorShaderNode`. The image starts in COLOR_ATTACHMENT_OPTIMAL,
+    /// matching the layout the engine expects after a canvas draw. The engine
+    /// does not own the image — destroy it yourself if you drop the node.
+    func makeThorNode(
+        canvas:               Tvg_Canvas,
+        width:                Int,
+        height:               Int,
+        computePipeline:      VkPipeline?       = nil,
+        computeLayout:        VkPipelineLayout? = nil,
+        computeDescriptorSet: VkDescriptorSet?  = nil
+    ) throws -> ThorShaderNode {
+        var image: VkImage?
+        var imageInfo = VkImageCreateInfo()
+        imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+        imageInfo.imageType     = VK_IMAGE_TYPE_2D
+        imageInfo.format        = VK_FORMAT_R8G8B8A8_UNORM
+        imageInfo.extent        = VkExtent3D(width: UInt32(width), height: UInt32(height), depth: 1)
+        imageInfo.mipLevels     = 1
+        imageInfo.arrayLayers   = 1
+        imageInfo.samples       = VK_SAMPLE_COUNT_1_BIT
+        imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL
+        imageInfo.usage         = VkImageUsageFlags(
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue |
+            VK_IMAGE_USAGE_SAMPLED_BIT.rawValue |
+            VK_IMAGE_USAGE_STORAGE_BIT.rawValue |
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT.rawValue
+        )
+        imageInfo.sharingMode   = VK_SHARING_MODE_EXCLUSIVE
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+        guard vkCreateImage(device, &imageInfo, nil, &image) == VK_SUCCESS, let image else {
+            throw VulkanEngineError.image
+        }
+
+        var requirements = VkMemoryRequirements()
+        vkGetImageMemoryRequirements(device, image, &requirements)
+        var memory: VkDeviceMemory?
+        var allocInfo = VkMemoryAllocateInfo()
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+        allocInfo.allocationSize = requirements.size
+        allocInfo.memoryTypeIndex = findMemoryType(
+            typeFilter: requirements.memoryTypeBits,
+            properties: VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)
+        )
+        guard vkAllocateMemory(device, &allocInfo, nil, &memory) == VK_SUCCESS else {
+            throw VulkanEngineError.memory
+        }
+        vkBindImageMemory(device, image, memory, 0)
+
+        var view: VkImageView?
+        var viewInfo = VkImageViewCreateInfo()
+        viewInfo.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+        viewInfo.image    = image
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D
+        viewInfo.format   = VK_FORMAT_R8G8B8A8_UNORM
+        viewInfo.subresourceRange = VkImageSubresourceRange(
+            aspectMask:     VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue),
+            baseMipLevel:   0, levelCount: 1,
+            baseArrayLayer: 0, layerCount: 1
+        )
+        guard vkCreateImageView(device, &viewInfo, nil, &view) == VK_SUCCESS, let view else {
+            throw VulkanEngineError.image
+        }
+
+        oneTimeSubmit { cmd in
+            engineImageBarrier(
+                cmd,
+                image:     image,
+                srcLayout: VK_IMAGE_LAYOUT_UNDEFINED,
+                srcAccess: 0,
+                srcStage:  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                dstLayout: VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                dstAccess: VkAccessFlags(VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT.rawValue),
+                dstStage:  VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+            )
+        }
+
+        return ThorShaderNode(
+            canvas:               ThorVulkanCanvas(base: canvas),
+            width:                UInt32(width),
+            height:               UInt32(height),
+            image:                image,
+            imageView:            view,
+            storageCapable:       true,
+            computePipeline:      computePipeline,
+            computeLayout:        computeLayout,
+            computeDescriptorSet: computeDescriptorSet
+        )
+    }
+
+    /// Create a `ThorShaderNode` whose VkImage is *imported* from an
+    /// existing `id<MTLTexture>` (via VK_EXT_metal_objects) instead of
+    /// freshly allocated. Use this when another API already renders into a
+    /// Metal texture and the composite pass should read that exact GPU
+    /// memory — no copy, no second allocation.
+    ///
+    /// `mtlTexture` must be the raw `id<MTLTexture>` pointer (e.g. from
+    /// `wgpuTextureGetNativeMetalTexture`), format BGRA8Unorm, matching
+    /// `width`/`height` exactly. `VkImportMetalTextureInfoEXT` has an
+    /// Objective-C field (`mtlTexture`) that doesn't import into this
+    /// plain-C Swift target, so its 32-byte layout — identical in shape to
+    /// `VkMetalSurfaceCreateInfoEXT` above — is laid out by hand:
+    /// sType@0, pNext@8, plane@16, mtlTexture@24.
+    func makeThorNode(
+        canvas:               Tvg_Canvas,
+        importingMetalTexture mtlTexture: UnsafeMutableRawPointer,
+        width:                Int,
+        height:               Int,
+        storageCapable:       Bool              = false,
+        computePipeline:      VkPipeline?       = nil,
+        computeLayout:        VkPipelineLayout? = nil,
+        computeDescriptorSet: VkDescriptorSet?  = nil
+    ) throws -> ThorShaderNode {
+        // VkImportMetalTextureInfoEXT, hand-laid: sType@0 pNext@8 plane@16 mtlTexture@24 (32 bytes).
+        // Built first and chained onto BOTH the image creation and the
+        // memory allocation — the struct name suggests it's the image
+        // itself that should directly wrap the Metal texture, not just the
+        // backing memory, and chaining it in both places costs nothing.
+        let importInfo = UnsafeMutableRawPointer.allocate(byteCount: 32, alignment: MemoryLayout<UInt>.alignment)
+        defer { importInfo.deallocate() }
+        importInfo.initializeMemory(as: UInt8.self, repeating: 0, count: 32)
+        importInfo.storeBytes(
+            of: VK_STRUCTURE_TYPE_IMPORT_METAL_TEXTURE_INFO_EXT.rawValue,
+            toByteOffset: 0,
+            as: UInt32.self
+        )
+        importInfo.storeBytes(
+            of: VK_IMAGE_ASPECT_COLOR_BIT.rawValue,
+            toByteOffset: 16,
+            as: UInt32.self
+        )
+        importInfo.storeBytes(
+            of: UInt(bitPattern: mtlTexture),
+            toByteOffset: 24,
+            as: UInt.self
+        )
+
+        var externalMemoryInfo = VkExternalMemoryImageCreateInfo()
+        externalMemoryInfo.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO
+        externalMemoryInfo.pNext = UnsafeRawPointer(importInfo)
+        externalMemoryInfo.handleTypes = VkExternalMemoryHandleTypeFlags(
+            VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLTEXTURE_BIT_EXT.rawValue
+        )
+
+        var image: VkImage?
+        let imageResult: VkResult = withUnsafePointer(to: &externalMemoryInfo) { extPtr in
+            var imageInfo = VkImageCreateInfo()
+            imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+            imageInfo.pNext         = UnsafeRawPointer(extPtr)
+            imageInfo.imageType     = VK_IMAGE_TYPE_2D
+            imageInfo.format        = VK_FORMAT_B8G8R8A8_UNORM
+            imageInfo.extent        = VkExtent3D(width: UInt32(width), height: UInt32(height), depth: 1)
+            imageInfo.mipLevels     = 1
+            imageInfo.arrayLayers   = 1
+            imageInfo.samples       = VK_SAMPLE_COUNT_1_BIT
+            // LINEAR: an explicit, unambiguous byte layout both APIs agree
+            // on. OPTIMAL is an implementation-defined tiled layout that
+            // MoltenVK normally owns and knows how to detile — for an
+            // *imported* Metal texture it doesn't own that layout, and
+            // detiling it wrong would explain reading back only scattered,
+            // low-alpha antialiasing-fringe pixels instead of the shape's
+            // actual opaque interior.
+            imageInfo.tiling        = VK_IMAGE_TILING_LINEAR
+            var usage = VkImageUsageFlags(
+                VK_IMAGE_USAGE_SAMPLED_BIT.rawValue |
+                VK_IMAGE_USAGE_TRANSFER_SRC_BIT.rawValue |
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT.rawValue
+            )
+            if storageCapable {
+                // Lets a canvas post shader bind this image as its compute
+                // storage output. Only requested when the underlying
+                // MTLTexture actually has shaderWrite (see makeWidgetNode).
+                usage |= VkImageUsageFlags(VK_IMAGE_USAGE_STORAGE_BIT.rawValue)
+            }
+            imageInfo.usage         = usage
+            imageInfo.sharingMode   = VK_SHARING_MODE_EXCLUSIVE
+            imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+            return vkCreateImage(device, &imageInfo, nil, &image)
+        }
+        guard imageResult == VK_SUCCESS, let image else {
+            throw VulkanEngineError.image
+        }
+
+        var requirements = VkMemoryRequirements()
+        vkGetImageMemoryRequirements(device, image, &requirements)
+
+        var memory: VkDeviceMemory?
+        var allocInfo = VkMemoryAllocateInfo()
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+        allocInfo.pNext = UnsafeRawPointer(importInfo)
+        allocInfo.allocationSize = requirements.size
+        allocInfo.memoryTypeIndex = findMemoryType(
+            typeFilter: requirements.memoryTypeBits,
+            properties: VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)
+        )
+        guard vkAllocateMemory(device, &allocInfo, nil, &memory) == VK_SUCCESS else {
+            throw VulkanEngineError.memory
+        }
+        vkBindImageMemory(device, image, memory, 0)
+
+        var view: VkImageView?
+        var viewInfo = VkImageViewCreateInfo()
+        viewInfo.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+        viewInfo.image    = image
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D
+        viewInfo.format   = VK_FORMAT_B8G8R8A8_UNORM
+        viewInfo.subresourceRange = VkImageSubresourceRange(
+            aspectMask:     VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue),
+            baseMipLevel:   0, levelCount: 1,
+            baseArrayLayer: 0, layerCount: 1
+        )
+        guard vkCreateImageView(device, &viewInfo, nil, &view) == VK_SUCCESS, let view else {
+            throw VulkanEngineError.image
+        }
+
+        // Content already lives in the imported texture (or will, once
+        // ThorVG draws) — transition to GENERAL, never UNDEFINED, so the
+        // driver isn't told it may discard it.
+        oneTimeSubmit { cmd in
+            engineImageBarrier(
+                cmd,
+                image:     image,
+                srcLayout: VK_IMAGE_LAYOUT_UNDEFINED,
+                srcAccess: 0,
+                srcStage:  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                dstLayout: VK_IMAGE_LAYOUT_GENERAL,
+                dstAccess: VkAccessFlags(VK_ACCESS_MEMORY_WRITE_BIT.rawValue) | VkAccessFlags(VK_ACCESS_MEMORY_READ_BIT.rawValue),
+                dstStage:  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
+            )
+        }
+
+        return ThorShaderNode(
+            canvas:               ThorVulkanCanvas(base: canvas),
+            width:                UInt32(width),
+            height:               UInt32(height),
+            image:                image,
+            imageView:            view,
+            isExternallyBacked:   true,
+            storageCapable:       storageCapable,
+            computePipeline:      computePipeline,
+            computeLayout:        computeLayout,
+            computeDescriptorSet: computeDescriptorSet
+        )
+    }
+
+    /// Whether MoltenVK exposes storage-image use on linear-tiled BGRA8 —
+    /// the exact image shape `makeThorNode(importingMetalTexture:)` creates.
+    /// Gates canvas post-shader support on the Vulkan side.
+    private func supportsLinearBgraStorage() -> Bool {
+        var props = VkFormatProperties()
+        vkGetPhysicalDeviceFormatProperties(
+            physicalDevice,
+            VK_FORMAT_B8G8R8A8_UNORM,
+            &props
+        )
+        return (props.linearTilingFeatures & VkFormatFeatureFlags(VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT.rawValue)) != 0
+    }
+
+    /// Record + submit a transient command buffer and block until done.
+    func oneTimeSubmit(_ body: (VkCommandBuffer) -> Void) {
+        var cmd: VkCommandBuffer?
+        var allocInfo = VkCommandBufferAllocateInfo()
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+        allocInfo.commandPool = commandPool
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY
+        allocInfo.commandBufferCount = 1
+        vkAllocateCommandBuffers(device, &allocInfo, &cmd)
+        guard let cmd else { return }
+
+        var begin = VkCommandBufferBeginInfo()
+        begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+        begin.flags = VkCommandBufferUsageFlags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT.rawValue)
+        vkBeginCommandBuffer(cmd, &begin)
+        body(cmd)
+        vkEndCommandBuffer(cmd)
+
+        var cmdOpt: VkCommandBuffer? = cmd
+        withUnsafePointer(to: &cmdOpt) { cmdPtr in
+            var submitInfo = VkSubmitInfo()
+            submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
+            submitInfo.commandBufferCount = 1
+            submitInfo.pCommandBuffers = cmdPtr
+            vkQueueSubmit(graphicsQueue, 1, &submitInfo, nil)
+        }
+        vkQueueWaitIdle(graphicsQueue)
+        vkFreeCommandBuffers(device, commandPool, 1, &cmdOpt)
+    }
+}
+
+
+// MARK: - File-private helpers
+
+/// Layout-transition barrier (same shape as the one in VulkenRenderTest.swift,
+/// duplicated here because that one is file-private).
+private func engineImageBarrier(
+    _ cmd:     VkCommandBuffer,
+    image:     VkImage,
+    srcLayout: VkImageLayout,
+    srcAccess: VkAccessFlags,
+    srcStage:  VkPipelineStageFlagBits,
+    dstLayout: VkImageLayout,
+    dstAccess: VkAccessFlags,
+    dstStage:  VkPipelineStageFlagBits
+) {
+    var barrier = VkImageMemoryBarrier()
+    barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+    barrier.srcAccessMask       = srcAccess
+    barrier.dstAccessMask       = dstAccess
+    barrier.oldLayout           = srcLayout
+    barrier.newLayout           = dstLayout
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED
+    barrier.image               = image
+    barrier.subresourceRange    = VkImageSubresourceRange(
+        aspectMask:     VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue),
+        baseMipLevel:   0, levelCount: 1,
+        baseArrayLayer: 0, layerCount: 1
+    )
+    vkCmdPipelineBarrier(
+        cmd,
+        VkPipelineStageFlags(srcStage.rawValue),
+        VkPipelineStageFlags(dstStage.rawValue),
+        0, 0, nil, 0, nil, 1, &barrier
+    )
+}
+
+/// Call `body` with a C array of NULL-terminated C strings, valid for the call.
+private func withCStringArray<R>(
+    _ strings: [String],
+    _ body: (UnsafePointer<UnsafePointer<CChar>?>?, UInt32) -> R
+) -> R {
+    func recurse(_ index: Int, _ acc: [UnsafePointer<CChar>?]) -> R {
+        if index == strings.count {
+            return acc.withUnsafeBufferPointer { buf in
+                body(buf.baseAddress, UInt32(strings.count))
+            }
+        }
+        return strings[index].withCString { cString in
+            recurse(index + 1, acc + [cString])
+        }
+    }
+    return recurse(0, [])
+}
+
+private func enumerateInstanceExtensions() -> Set<String> {
+    var count: UInt32 = 0
+    vkEnumerateInstanceExtensionProperties(nil, &count, nil)
+    guard count > 0 else { return [] }
+    var props = [VkExtensionProperties](repeating: VkExtensionProperties(), count: Int(count))
+    vkEnumerateInstanceExtensionProperties(nil, &count, &props)
+    return Set(props.map(extensionName))
+}
+
+private func enumerateDeviceExtensions(_ gpu: VkPhysicalDevice) -> Set<String> {
+    var count: UInt32 = 0
+    vkEnumerateDeviceExtensionProperties(gpu, nil, &count, nil)
+    guard count > 0 else { return [] }
+    var props = [VkExtensionProperties](repeating: VkExtensionProperties(), count: Int(count))
+    vkEnumerateDeviceExtensionProperties(gpu, nil, &count, &props)
+    return Set(props.map(extensionName))
+}
+
+private func extensionName(_ prop: VkExtensionProperties) -> String {
+    var name = prop.extensionName
+    return withUnsafeBytes(of: &name) { raw in
+        String(cString: raw.bindMemory(to: CChar.self).baseAddress!)
+    }
+}
+
+private func makeEngineDescriptorPool(device: VkDevice, maxSets: Int) throws -> VkDescriptorPool {
+    let n = UInt32(maxSets)
+    let sizes = [
+        VkDescriptorPoolSize(type: VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, descriptorCount: n),
+        VkDescriptorPoolSize(type: VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          descriptorCount: n),
+        VkDescriptorPoolSize(type: VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,         descriptorCount: n),
+        VkDescriptorPoolSize(type: VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         descriptorCount: n),
+    ]
+    var pool: VkDescriptorPool?
+    let result = sizes.withUnsafeBufferPointer { buf -> VkResult in
+        var info = VkDescriptorPoolCreateInfo()
+        info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+        info.flags = VkDescriptorPoolCreateFlags(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT.rawValue)
+        info.maxSets = UInt32(maxSets)
+        info.poolSizeCount = UInt32(buf.count)
+        info.pPoolSizes = buf.baseAddress
+        return vkCreateDescriptorPool(device, &info, nil, &pool)
+    }
+    guard result == VK_SUCCESS, let pool else { throw VulkanEngineError.descriptorPool }
+    return pool
+}

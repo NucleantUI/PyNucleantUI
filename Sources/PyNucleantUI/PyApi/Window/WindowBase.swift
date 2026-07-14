@@ -12,18 +12,9 @@ import SulphurApplication
 
 //import AppKit
 
-// Optional hooks: check existence first rather than fetch-and-swallow —
-// most apps won't define most of these, and that's the normal case,
-// not an error worth routing through Python's exception machinery.
-extension PyPointer {
-    func optionalAttr(_ key: String) -> PyPointer? {
-        PyObject_HasAttr(self, key) ? try? PyObject_GetAttr(self, key: key) : nil
-    }
-}
-
 extension PyNucleantUI_Package {
     
-    @PyModule(name: "sulphur_ui.window")
+    @PyModule(name: "nucleant.window")
     struct Window: PyModuleProtocol {
         
         static let py_classes: [any (PyClassProtocol & AnyObject).Type] = [
@@ -35,47 +26,59 @@ extension PyNucleantUI_Package {
 
 
 
-@PyClass(self_ref: true)
+@PyClass(
+    self_ref: true
+)
 final class WindowBase: PyDeserialize {
-    
-    let platformWindow: PlatformWindow
     
     fileprivate weak var app: PyApp?
     
     fileprivate let __self__: PyPointer
     
     
-    private let _on_build:             PyPointer?
-    private let _on_mouse_down:        PyPointer?
-    private let _on_mouse_up:          PyPointer?
-    private let _on_mouse_dragged:     PyPointer?
-    private let _on_mouse_moved:       PyPointer?
-    private let _on_right_mouse_down:  PyPointer?
-    private let _on_right_mouse_up:    PyPointer?
-    private let _on_scroll:            PyPointer?
-    private let _on_key_down:          PyPointer?
-    private let _on_key_up:            PyPointer?
+    private let _on_build:             PyPointer = "on_build"
+    private let _on_frame:             PyPointer = "on_frame"
+    private let _on_mouse_down:        PyPointer = "on_mouse_down"
+    private let _on_mouse_up:          PyPointer = "on_mouse_up"
+    private let _on_mouse_dragged:     PyPointer = "on_mouse_dragged"
+    private let _on_mouse_moved:       PyPointer = "on_mouse_moved"
+    private let _on_right_mouse_down:  PyPointer = "on_right_mouse_down"
+    private let _on_right_mouse_up:    PyPointer = "on_right_mouse_up"
+    private let _on_scroll:            PyPointer = "on_scroll"
+    private let _on_key_down:          PyPointer = "on_key_down"
+    private let _on_key_up:            PyPointer = "on_key_up"
     
-    var renderEngine: VulkanRenderEngine
+    var platformWindow: PlatformWindow?
+    var renderEngine: VulkanRenderEngine?
     var rootWidget: SulphurWidgetBase?
+    
+    var win_rect: SIMD4<Int>
     
     @PyInit
     init(__self__: PyPointer, x: Int, y: Int, w: Int, h: Int) throws {
-        
+        win_rect = .init(x, y, w, h)
+        print(Self.self, "init")
+        pyPrint(__self__)
         self.__self__ = __self__
-        self._on_build            = __self__.optionalAttr("on_build")
-        self._on_mouse_down       = __self__.optionalAttr("on_mouse_down")
-        self._on_mouse_up         = __self__.optionalAttr("on_mouse_up")
-        self._on_mouse_dragged    = __self__.optionalAttr("on_mouse_dragged")
-        self._on_mouse_moved      = __self__.optionalAttr("on_mouse_moved")
-        self._on_right_mouse_down = __self__.optionalAttr("on_right_mouse_down")
-        self._on_right_mouse_up   = __self__.optionalAttr("on_right_mouse_up")
-        self._on_scroll           = __self__.optionalAttr("on_scroll")
-        self._on_key_down         = __self__.optionalAttr("on_key_down")
-        self._on_key_up           = __self__.optionalAttr("on_key_up")
-        
+    }
+    
+    deinit {
+        _on_build.decRef()
+        _on_mouse_down.decRef()
+        _on_mouse_up.decRef()
+        _on_mouse_dragged.decRef()
+        _on_mouse_moved.decRef()
+        _on_right_mouse_down.decRef()
+        _on_right_mouse_up.decRef()
+        _on_scroll.decRef()
+        _on_key_down.decRef()
+        _on_key_up.decRef()
+    }
+    
+    @PyMethod
+    func present() throws {
         let platformWindow = PlatformWindow(
-            contentRect: .init(x: x, y: y, width: w, height: h),
+            contentRect: .init(x: win_rect.x, y: win_rect.y, width: win_rect.z, height: win_rect.w),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
@@ -84,23 +87,14 @@ final class WindowBase: PyDeserialize {
         self.platformWindow = platformWindow
         platformWindow.win_delegate = self
         
+        platformWindow.makeKeyAndOrderFront(nil)
+        platformWindow.makeFirstResponder(nil)
         rootWidget = try on_build()
-    }
-    
-    deinit {
-        _on_build?.decRef()
-        _on_mouse_down?.decRef()
-        _on_mouse_up?.decRef()
-        _on_mouse_dragged?.decRef()
-        _on_mouse_moved?.decRef()
-        _on_right_mouse_down?.decRef()
-        _on_right_mouse_up?.decRef()
-        _on_scroll?.decRef()
-        _on_key_down?.decRef()
-        _on_key_up?.decRef()
+        print(rootWidget)
     }
     
     func onFrame(_ dt: Double) {
+        on_frame(dt: dt)
         rootWidget?.on_render(dt: dt)
     }
     
@@ -109,16 +103,16 @@ final class WindowBase: PyDeserialize {
 
 extension WindowBase {
     
-    @PyCall func on_build() throws -> SulphurWidgetBase?
-    
-    @PyCall func on_mouse_down(x: Double, y: Double)
-    @PyCall func on_mouse_up(x: Double, y: Double)
-    @PyCall func on_mouse_dragged(x: Double, y: Double)
-    @PyCall func on_mouse_moved(x: Double, y: Double)
-    @PyCall func on_right_mouse_down(x: Double, y: Double)
-    @PyCall func on_right_mouse_up(x: Double, y: Double)
-    @PyCall func on_scroll(dx: Double, dy: Double)
-    @PyCall func on_key_down(keyCode: UInt16, characters: String?)
-    @PyCall func on_key_up(keyCode: UInt16, characters: String?)
+    @PyCallMethod(path: \Self.__self__) func on_build() throws -> SulphurWidgetBase?
+    @PyCallMethod(path: \Self.__self__) func on_frame(dt: Double)
+    @PyCallMethod(path: \Self.__self__) func on_mouse_down(x: Double, y: Double)
+    @PyCallMethod(path: \Self.__self__) func on_mouse_up(x: Double, y: Double)
+    @PyCallMethod(path: \Self.__self__) func on_mouse_dragged(x: Double, y: Double)
+    @PyCallMethod(path: \Self.__self__) func on_mouse_moved(x: Double, y: Double)
+    @PyCallMethod(path: \Self.__self__) func on_right_mouse_down(x: Double, y: Double)
+    @PyCallMethod(path: \Self.__self__) func on_right_mouse_up(x: Double, y: Double)
+    @PyCallMethod(path: \Self.__self__) func on_scroll(dx: Double, dy: Double)
+    @PyCallMethod(path: \Self.__self__) func on_key_down(keyCode: UInt16, characters: String?)
+    @PyCallMethod(path: \Self.__self__) func on_key_up(keyCode: UInt16, characters: String?)
 }
 

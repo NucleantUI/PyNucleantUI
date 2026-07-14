@@ -38,10 +38,11 @@ extension WindowBase {
         let metalLayer: CAMetalLayer
         
         override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask, backing backingStoreType: NSWindow.BackingStoreType, defer flag: Bool) {
-            let view = SulphurNSView(frame: NSRect(origin: .zero, size: contentRect.size))
+            let view = DemoNSView(frame: .init(origin: .zero, size: contentRect.size))
             self.metalLayer = view.metalLayer
             super.init(contentRect: contentRect, styleMask: style, backing: backingStoreType, defer: flag)
             self.contentView = view
+            self.startDisplayLink()
         }
         
         public override func mouseDown(with event: NSEvent) {
@@ -80,6 +81,8 @@ extension WindowBase {
             win_delegate?.keyUp(key: event.keyCode, chars: event.characters)
         }
         
+        
+        
         func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
             
             return frameSize
@@ -93,6 +96,22 @@ extension WindowBase {
         func windowDidBecomeKey(_ notification: Notification) {
             
         }
+        
+        public func startDisplayLink() {
+                if #available(macOS 14.0, *) {
+                    startCADisplayLink()
+                } else {
+                    startCVDisplayLink()
+                }
+            }
+
+            public func stopDisplayLink() {
+                if let dl = _displayLink {
+                    CVDisplayLinkStop(dl)
+                    _displayLink = nil
+                }
+            }
+
     }
     
 }

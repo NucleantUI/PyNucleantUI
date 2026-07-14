@@ -22,11 +22,23 @@ class PyApp {
     
     
     @PyInit
-    init(__self__: PyPointer) {
+    init(__self__: PyPointer, threads: UInt32) {
+        
+        tvg_engine_init(threads)
+        
         self.__self__ = __self__
+        _on_start = "on_start"
+        
+        setup()
+        
+        
     }
     
-    private var _on_start: PyPointer?
+    private var _on_start: PyPointer
+
+    #if os(macOS)
+    var appDelegate: AppDelegate?
+    #endif
     
     @PyMethod()
     func run() {
@@ -46,19 +58,21 @@ class PyApp {
         if let py_cls = registeredWindows[name] {
             let window = try WindowBase.casted(unsafe: PyObject_CallNoArgs(py_cls))
             // make window appear
-            
+            // PyObject_CallMethodNoArgs(self: UnsafeMutablePointer<PyObject>!, name: UnsafeMutablePointer<PyObject>!)
+            // PyObject_CallMethodOneArg(self: UnsafeMutablePointer<PyObject>!, name: UnsafeMutablePointer<PyObject>!, arg: UnsafeMutablePointer<PyObject>!)
+            // PyObject_VectorcallMethod(name: UnsafeMutablePointer<PyObject>!, args: UnsafePointer<UnsafeMutablePointer<PyObject>?>!, nargsf: Int, kwnames: UnsafeMutablePointer<PyObject>!)
         }
     }
     
     @PyMethod
     func open_window(window: WindowBase) throws {
-        window.platformWindow.makeFirstResponder(nil)
+       //try window.present()
     }
 }
 
 extension PyApp {
     
-    @PyCall(method: true)
+    @PyCallMethod(path: \Self.__self__)
     func on_start()
     
 }
