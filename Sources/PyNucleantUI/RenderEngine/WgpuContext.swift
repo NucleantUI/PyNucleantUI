@@ -22,6 +22,14 @@ import CWgpu
 
 public final class WgpuContext {
 
+    /// One wgpu context for the whole process. Unlike the render engine —
+    /// which is bound to one window's CAMetalLayer surface and therefore
+    /// per-window — this context only bootstraps a device and mints target
+    /// textures, so every window's nodes can share it: each engine imports
+    /// the textures' Metal memory independently. nil when wgpu bootstrap
+    /// failed (logged by init).
+    public static let shared: WgpuContext? = WgpuContext()
+
     let instance: WGPUInstance
     let adapter:  WGPUAdapter
     let device:   WGPUDevice
@@ -169,6 +177,15 @@ public final class WgpuContext {
     /// its completion guarantees everything submitted before it — Thor's
     /// blit included — has also completed.
     func waitForGPUCompletion() {
+        // The fence below only proves completion — it never lets wgpu_core
+        // run its maintain pass. wgpuQueueSubmit parks per-submission
+        // tracking data (command-buffer/encoder allocations, textures
+        // pending destruction) on the device, and ONLY wgpuDevicePoll
+        // reclaims it once the submission is done. Nothing else in this
+        // process ever polls, so skipping this leaks ~3.4 KB per canvas
+        // draw — hundreds of MB per minute across all live canvases. The
+        // non-blocking poll after the fence reclaims everything at once.
+        defer { _ = wgpuDevicePoll(device, 0 /* don't block */, nil) }
         guard let rawQueue = wgpuQueueGetNativeMetalCommandQueue(queue) else { return }
         let mtlQueue = Unmanaged<AnyObject>.fromOpaque(rawQueue).takeUnretainedValue() as! MTLCommandQueue
         guard let fence = mtlQueue.makeCommandBuffer() else { return }

@@ -90,12 +90,38 @@ final class WindowBase: PyDeserialize {
         platformWindow.makeKeyAndOrderFront(nil)
         platformWindow.makeFirstResponder(nil)
         rootWidget = try on_build()
-        print(rootWidget)
+        attachRootWidget()
     }
-    
+
+    /// Bind the tree `on_build` returned into this window's engine: the
+    /// context handed down here is what makes each canvas build its render
+    /// node and join the engine's composite list. No pre-built root node —
+    /// every canvas in the tree owns its own node (`ownNode` stays nil);
+    /// the engine is this window's, the wgpu context the process-wide one.
+    private func attachRootWidget() {
+        guard let rootWidget, let renderEngine else { return }
+        guard let wgpu = WgpuContext.shared else {
+            print("WindowBase: no wgpu context — canvases stay unattached")
+            return
+        }
+        let drawable = renderEngine.metalLayer.drawableSize
+        let width  = drawable.width  > 0 ? Int(drawable.width)  : win_rect.z
+        let height = drawable.height > 0 ? Int(drawable.height) : win_rect.w
+        rootWidget.attach(
+            engine: renderEngine,
+            wgpu:   wgpu,
+            width:  width,
+            height: height
+        )
+    }
+
+    /// Per display-link tick: Python's frame hook first (game state), then
+    /// the tree's render pass (canvases flag dirty / run update hooks), then
+    /// the engine draws what got flagged.
     func onFrame(_ dt: Double) {
         on_frame(dt: dt)
         rootWidget?.on_render(dt: dt)
+        renderEngine?.drawFrame(dt)
     }
     
     
