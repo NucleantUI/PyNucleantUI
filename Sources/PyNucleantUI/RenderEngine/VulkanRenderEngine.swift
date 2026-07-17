@@ -85,44 +85,43 @@ public final class VulkanRenderEngine: VulkanContext {
 
     /// Removes a single node from the composite list — e.g. when the widget
     /// owning it is dropped from the tree, so a stale image doesn't keep
-    /// drawing every frame. Groups aren't addressed by this (nothing builds
-    /// one yet).
-    public func remove(_ node: ThorShaderNode) {
-        let id = ObjectIdentifier(node).hashValue
-        nodes.removeAll { entry in
-            //if case .thor(let n) = entry { return Int(n) == id }
-            entry.id == id
-            return false
-        }
-        nodeSets.removeValue(forKey: id)
-        if let pool = nodeDescriptorPools.removeValue(forKey: id) {
-            vkDestroyDescriptorPool(device, pool, nil)
-        }
-        readable.remove(id)
-        warnedFailedNodes.remove(id)
+    /// drawing every frame. Keyed by the slot's stable id (the owning
+    /// canvas's `id`, the same value it was appended with). Groups aren't
+    /// addressed by this (nothing builds one yet).
+    public func remove(id: Int) {
+        // let id = ObjectIdentifier(node).hashValue
+        // ^ replaced (update-render-system.md): identity is the canvas-owned
+        //   Int id carried by RenderNode, never derived from the node object.
+        nodes.removeAll { $0.id == id }
+        releaseTracking(of: id)
     }
 
-    /// Swap a node's composite slot in place — same z-position, new GPU
+    /// Swap a slot's context in place — same id, same z-position, new GPU
     /// resources. `remove` + `append` would hoist a rebuilt node above
     /// every sibling; a frame resize must not change stacking order.
-    /// Falls back to append when the old node isn't listed.
-    public func replace(_ old: ThorShaderNode, with new: ThorShaderNode) {
-        let id = ObjectIdentifier(old).hashValue
+    /// Falls back to append when the id isn't listed.
+    public func replace(id: Int, with context: RenderNode.Context) {
+        // let id = ObjectIdentifier(old).hashValue
+        // ^ replaced, same as remove(id:) — see note there.
+        releaseTracking(of: id)
+        if let index = nodes.firstIndex(where: { $0.id == id }) {
+            nodes[index] = .init(id: id, context: context)
+        } else {
+            nodes.append(.init(id: id, context: context))
+        }
+    }
+
+    /// Everything the engine tracked against a slot id — descriptor set +
+    /// its dedicated pool, readable state, warn-once marker. Shared by
+    /// `remove(id:)` / `replace(id:with:)`; the next frame re-derives it
+    /// all for whatever occupies the id afterwards.
+    private func releaseTracking(of id: Int) {
         nodeSets.removeValue(forKey: id)
         if let pool = nodeDescriptorPools.removeValue(forKey: id) {
             vkDestroyDescriptorPool(device, pool, nil)
         }
         readable.remove(id)
         warnedFailedNodes.remove(id)
-        let index = nodes.firstIndex { entry in
-            //if case .thor(let n) = entry.context { return Int(n) == id }
-            return false
-        }
-        if let index {
-            nodes[index] = .init(id: id.hashValue, context: .thor(new))
-        } else {
-            nodes.append(.init(id: id.hashValue, context: .thor(new)))
-        }
     }
 
     /// The GPU-side counterpart of `remove(_:)`: destroys the VkImage /
@@ -422,18 +421,7 @@ public final class VulkanRenderEngine: VulkanContext {
 
         // 1. Node content updates (outside the render pass).
         for node in nodes {
-            switch node.context {
-            case .thor(let thorShaderNode):
-                update(thorShaderNode, cmd: cmd)
-            case .skia(let skiaShaderNode):
-                update(skiaShaderNode, cmd: cmd)
-            case .shader(let oGLShaderNode):
-                update(oGLShaderNode, cmd: cmd)
-            case .group(let groupNode):
-                update(groupNode, cmd: cmd)
-            case .texture_group(_):
-                fatalError("TextureGroup not implemented yet")
-            }
+            update(node, cmd: cmd)
         }
 
         // 2. Composite every published node onto the swapchain image.
@@ -451,17 +439,41 @@ public final class VulkanRenderEngine: VulkanContext {
     }
 
     // MARK: - Node updates
+
+    /// Per-slot dispatch: routes a `RenderNode` to the update matching its
+    /// context. Groups recurse — each child is a full slot with its own id
+    /// and dirty tracking.
+    private func update(_ node: RenderNode, cmd: VkCommandBuffer) {
+        switch node.context {
+        case .thor(let thorShaderNode):
+            update(thorShaderNode, slot: node, cmd: cmd)
+        case .skia(let skiaShaderNode):
+            update(skiaShaderNode, slot: node, cmd: cmd)
+        case .shader(let oGLShaderNode):
+            update(oGLShaderNode, slot: node, cmd: cmd)
+        case .group(let groupNode):
+            update(groupNode, cmd: cmd)
+        case .texture_group(_):
+            fatalError("TextureGroup not implemented yet")
+        }
+    }
+
     private func update(_ group: GroupNode, cmd: VkCommandBuffer) {
         for node in group.nodes {
-            //update(node.context, cmd: cmd)
+            update(node, cmd: cmd)
         }
     }
     /// Draw + sync the node's ThorVG canvas, then barrier the image
     /// (optionally through the node's compute post-process) into
     /// SHADER_READ_ONLY for the composite pass.
-    private func update(_ node: ThorShaderNode, cmd: VkCommandBuffer) {
-        let id = ObjectIdentifier(node).hashValue
-        guard node.dirty else { return }
+    private func update(_ node: ThorShaderNode, slot: RenderNode, cmd: VkCommandBuffer) {
+        // let id = ObjectIdentifier(node).hashValue
+        // ^ replaced: the slot carries the canvas-owned id.
+        let id = slot.id
+        // guard node.dirty else { return }
+        // ^ the dirty marker moved up to the slot — Observation on the
+        //   shader node feeds it (see RenderNode.observe).
+        guard slot.needsRender else { return }
         let drawResult = node.canvas.draw()
         let syncResult = drawResult == TVG_RESULT_SUCCESS ? node.canvas.sync() : drawResult
         guard drawResult == TVG_RESULT_SUCCESS, syncResult == TVG_RESULT_SUCCESS else {
@@ -471,7 +483,18 @@ public final class VulkanRenderEngine: VulkanContext {
             return
         }
         warnedFailedNodes.remove(id)
-        node.dirty = false
+        // node.dirty = false
+        // ^ must NOT write back to the shader node: the slot observes it,
+        //   so an engine-side write would fire onChange and re-mark the
+        //   slot dirty — a permanent redraw loop. The engine consumes the
+        //   slot's flag only.
+        // slot.needsRender = false
+        // ^ deliberately NOT cleared for now: nothing drives per-frame
+        //   updates yet (tetris side isn't wired up), so slots stay
+        //   permanently dirty and every node redraws every frame — which
+        //   is also the intended leak-amplifier mode while leaks are
+        //   hunted. Re-enable clearing once the canvas side really drives
+        //   updates through the Observation chain.
         node.waitForExternalCompletion?()
 
         // Barriers must declare the layout the image is *really* in right
@@ -532,6 +555,48 @@ public final class VulkanRenderEngine: VulkanContext {
         readable.insert(id)
     }
 
+    /// The shader-only counterpart of the thor update: no canvas draw —
+    /// the compute dispatch writes the whole image. Without an installed
+    /// pipeline the node has no content, so it stays unpublished (never
+    /// enters `readable`) instead of compositing garbage.
+    private func update(_ node: OGLShaderNode, slot: RenderNode, cmd: VkCommandBuffer) {
+        guard slot.needsRender else { return }
+        guard let pipeline = node.computePipeline,
+              let layout   = node.computeLayout,
+              let ds       = node.computeDescriptorSet
+        else { return }
+
+        engineImageBarrier(
+            cmd,
+            image:     node.image,
+            srcLayout: node.currentLayout,
+            srcAccess: VkAccessFlags(VK_ACCESS_SHADER_READ_BIT.rawValue) | VkAccessFlags(VK_ACCESS_SHADER_WRITE_BIT.rawValue),
+            srcStage:  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            dstLayout: VK_IMAGE_LAYOUT_GENERAL,
+            dstAccess: VkAccessFlags(VK_ACCESS_SHADER_READ_BIT.rawValue) | VkAccessFlags(VK_ACCESS_SHADER_WRITE_BIT.rawValue),
+            dstStage:  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+        )
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline)
+        var descSet: VkDescriptorSet? = ds
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &descSet, 0, nil)
+        vkCmdDispatch(cmd, (node.width + 7) / 8, (node.height + 7) / 8, 1)
+        engineImageBarrier(
+            cmd,
+            image:     node.image,
+            srcLayout: VK_IMAGE_LAYOUT_GENERAL,
+            srcAccess: VkAccessFlags(VK_ACCESS_SHADER_WRITE_BIT.rawValue),
+            srcStage:  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            dstLayout: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            dstAccess: VkAccessFlags(VK_ACCESS_SHADER_READ_BIT.rawValue),
+            dstStage:  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+        )
+        node.currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        readable.insert(slot.id)
+        // slot.needsRender = false
+        // ^ same as the thor update above: kept permanently dirty until
+        //   something actually drives updates.
+    }
+
     // MARK: - Composite pass
 
     private func recordCompositePass(cmd: VkCommandBuffer, imageIndex: Int) {
@@ -558,29 +623,54 @@ public final class VulkanRenderEngine: VulkanContext {
         let scissor = VkRect2D(offset: VkOffset2D(x: 0, y: 0), extent: extent)
 
         for node in nodes {
-            switch node.context {
-            case .thor(let thorShaderNode):
-                guard readable.contains(node.id),
-                      let set = descriptorSet(for: thorShaderNode) else { continue }
-                composite.record(
-                    commandBuffer: cmd,
-                    descriptorSet: set,
-                    viewport:      viewport,
-                    scissor:       scissor
-                )
-            default:
-                continue
-            }
+            recordComposite(of: node, cmd: cmd, viewport: viewport, scissor: scissor)
         }
 
         vkCmdEndRenderPass(cmd)
     }
-    // TODO: we should not used ObjectIdentifier anymore always just Int / Hash
-    private func descriptorSet(for node: ThorShaderNode) -> VkDescriptorSet? {
-        let id = ObjectIdentifier(node).hashValue
+
+    /// Composite one slot, recursing into groups. A slot only draws once a
+    /// frame update actually published its image (`readable`) — a node that
+    /// never rendered has nothing safe to sample.
+    private func recordComposite(
+        of node:  RenderNode,
+        cmd:      VkCommandBuffer,
+        viewport: VkViewport,
+        scissor:  VkRect2D
+    ) {
+        let imageView: VkImageView
+        switch node.context {
+        case .thor(let thorShaderNode):
+            imageView = thorShaderNode.imageView
+        case .skia(let skiaShaderNode):
+            imageView = skiaShaderNode.imageView
+        case .shader(let oGLShaderNode):
+            imageView = oGLShaderNode.imageView
+        case .group(let groupNode):
+            for child in groupNode.nodes {
+                recordComposite(of: child, cmd: cmd, viewport: viewport, scissor: scissor)
+            }
+            return
+        case .texture_group:
+            return
+        }
+        guard readable.contains(node.id),
+              let set = descriptorSet(id: node.id, imageView: imageView) else { return }
+        composite.record(
+            commandBuffer: cmd,
+            descriptorSet: set,
+            viewport:      viewport,
+            scissor:       scissor
+        )
+    }
+
+    // TODO resolved: keyed by the slot's stable Int id, never ObjectIdentifier.
+    private func descriptorSet(id: Int, imageView: VkImageView) -> VkDescriptorSet? {
+        // let id = ObjectIdentifier(node).hashValue
+        // ^ replaced — RenderNode.id is the one identity both sides share.
         if let set = nodeSets[id] { return set }
         guard let allocated = try? composite.allocateNodeDescriptorSet() else { return nil }
-        composite.updateDescriptorSet(allocated.set, imageViews: [node.imageView])
+        composite.updateDescriptorSet(allocated.set, imageViews: [imageView])
         nodeSets[id] = allocated.set
         nodeDescriptorPools[id] = allocated.pool
         return allocated.set

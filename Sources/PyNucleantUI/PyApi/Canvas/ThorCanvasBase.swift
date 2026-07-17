@@ -114,7 +114,10 @@ public final class ThorCanvasBase: PyCanvasBase, ThorGPUCanvas, PyCapsuleProtoco
         // node's image — take it down (drains the GPU with it) before the
         // old node leaves the composite.
         postShader?.detach()
-        engine.replace(oldNode, with: built.node)
+        // engine.replace(oldNode, with: built.node)
+        // ^ slots are id-keyed now: same canvas id, new node in the same
+        //   z-position.
+        engine.replace(id: id, with: .thor(built.node))
 
         // makeWidgetNode retargeted `base` at the new texture, so the old
         // texture and the old node's Vulkan image are only ours now.
@@ -214,8 +217,10 @@ public final class ThorCanvasBase: PyCanvasBase, ThorGPUCanvas, PyCapsuleProtoco
             }
             node        = built.node
             thorTexture = built.texture
-            // TODO: as before we should use proper hash as id that both sides uses
-            engine.append(.init(id: ObjectIdentifier( built.node).hashValue, context: .thor(built.node)))
+            // TODO resolved: the canvas's own `id` (UUID().hashValue) is the
+            // slot id — the one identity the engine keys everything by.
+            // engine.append(.init(id: ObjectIdentifier( built.node).hashValue, context: .thor(built.node)))
+            engine.append(.init(id: id, context: .thor(built.node)))
         } else if let frame = _frame {
             // Already-built node re-attaching under a frame that changed
             // while detached — same path as a live frame change.
@@ -245,8 +250,9 @@ public final class ThorCanvasBase: PyCanvasBase, ThorGPUCanvas, PyCapsuleProtoco
         // Keep the shader object (it reinstalls on re-attach), but its
         // pipeline points at this node's image — tear that down with it.
         postShader?.detach()
-        if let node, let engine {
-            engine.remove(node)
+        if node != nil, let engine {
+            // engine.remove(node)
+            engine.remove(id: id)
         }
         node = nil
         thorTexture = nil

@@ -7,12 +7,18 @@ import VulkanCore
 import CVulkan
 import SulphurCore
 import CWgpu
+import Observation
 
 
 /// The engine's single node type: a ThorVG GPU canvas rendering into a
 /// VkImage, plus an optional compute shader post-process. Conforms to
 /// `VulkanThorRenderNode`, so it also works as the concrete `B` of
 /// `RenderNodeEnum` / `renderFrame`.
+///
+/// `@Observable` so the owning `RenderNode` slot can track the mutable
+/// render-affecting state (`dirty`, the compute trio) — canvas-side code
+/// keeps writing `node.dirty = true` and the slot notices on its own.
+@Observable
 public final class ThorShaderNode: VulkanThorRenderNode {
 
     public var canvas: ThorVulkanCanvas
