@@ -163,7 +163,11 @@ extension WindowBase: WindowBaseDelegate {
 
 // MARK: - CVDisplayLink (macOS < 14)
 
-@available(macOS, introduced: 10.4, obsoleted: 14.0)
+//@available(macOS, introduced: 10.4, obsoleted: 14.0)
+// ^ original annotation — `obsoleted` stops compiling under the macOS 14
+// deployment floor (Observation), so `deprecated` stands in below. The
+// whole CVDisplayLink path stays intact for a future pre-14 build.
+@available(macOS, introduced: 10.4, deprecated: 14.0)
 private extension WindowBase.PlatformWindow {
     func startCVDisplayLink() {
         var dl: CVDisplayLink?

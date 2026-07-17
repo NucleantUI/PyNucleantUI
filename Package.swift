@@ -6,7 +6,10 @@ import PackageDescription
 let package = Package(
     name: "PyNucleantUI",
     platforms: [
-        .macOS(.v13)
+        // v14 floor: SulphurFrame is @Observable (Observation framework).
+        // If a pre-14 target ever matters, a patched OpenObservation clone
+        // is parked at /Volumes/CodeSSD/dev_projects/OpenObservation.
+        .macOS(.v14)
     ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.

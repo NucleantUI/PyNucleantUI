@@ -165,6 +165,14 @@ public final class WgpuContext {
         wgpuTextureGetNativeMetalTexture(texture)
     }
 
+    /// Drop our reference to a `makeTargetTexture` texture. wgpu refcounts
+    /// it and keeps it alive through any in-flight submission, but ThorVG
+    /// holds its own reference while the texture is still a canvas's
+    /// render target — retarget the canvas first or the memory stays.
+    func release(texture: WGPUTexture) {
+        wgpuTextureRelease(texture)
+    }
+
     /// Blocks until every command previously submitted to this queue has
     /// actually finished on the GPU — not just been queued.
     /// `wgpuQueueSubmit` (used internally by ThorVG's wg backend to flush

@@ -21,6 +21,11 @@ public final class ThorShaderNode: VulkanThorRenderNode {
 
     public let image:                VkImage
     public let imageView:            VkImageView
+    /// The allocation backing `image` — the engine binds but never frees
+    /// it, so the node carries the handle for whoever tears the node down
+    /// (resize, detach). For imported textures this is the import
+    /// allocation, not memory the engine really owns.
+    public let memory:               VkDeviceMemory?
     public var computePipeline:      VkPipeline?
     public var computeLayout:        VkPipelineLayout?
     public var computeDescriptorSet: VkDescriptorSet?
@@ -64,6 +69,7 @@ public final class ThorShaderNode: VulkanThorRenderNode {
         height:               UInt32,
         image:                VkImage,
         imageView:            VkImageView,
+        memory:               VkDeviceMemory?   = nil,
         isExternallyBacked:   Bool              = false,
         storageCapable:       Bool              = false,
         computePipeline:      VkPipeline?       = nil,
@@ -75,6 +81,7 @@ public final class ThorShaderNode: VulkanThorRenderNode {
         self.height               = height
         self.image                = image
         self.imageView            = imageView
+        self.memory               = memory
         self.isExternallyBacked   = isExternallyBacked
         self.storageCapable       = storageCapable
         self.currentLayout        = isExternallyBacked ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL

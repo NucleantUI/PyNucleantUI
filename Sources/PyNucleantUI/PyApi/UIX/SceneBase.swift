@@ -29,6 +29,11 @@ public final class PySulphurSceneBase: PyCanvasBase {
 
     public weak var owner: SulphurWidgetBase?
 
+    /// Recorded to satisfy the canvas contract, nothing more yet — a scene
+    /// renders at whatever size its host node has. The obvious next use is
+    /// translating the wrapped paint by `frame.pos`.
+    public weak var frame: SulphurFrame?
+
     /// The canvas this scene's paint currently lives on. Weak: the host
     /// belongs to its own widget, this is only the record for detach.
     weak var hostCanvas: (any PyCanvasBase)?

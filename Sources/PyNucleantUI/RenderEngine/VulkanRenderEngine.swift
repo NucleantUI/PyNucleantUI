@@ -114,6 +114,45 @@ public final class VulkanRenderEngine: VulkanContext {
         warnedFailedNodes.remove(id)
     }
 
+    /// Swap a node's composite slot in place — same z-position, new GPU
+    /// resources. `remove` + `append` would hoist a rebuilt node above
+    /// every sibling; a frame resize must not change stacking order.
+    /// Falls back to append when the old node isn't listed.
+    public func replace(_ old: ThorShaderNode, with new: ThorShaderNode) {
+        let id = ObjectIdentifier(old)
+        nodeSets.removeValue(forKey: id)
+        if let pool = nodeDescriptorPools.removeValue(forKey: id) {
+            vkDestroyDescriptorPool(device, pool, nil)
+        }
+        readable.remove(id)
+        warnedFailedNodes.remove(id)
+        let index = nodes.firstIndex { entry in
+            if case .node(let n) = entry { return ObjectIdentifier(n) == id }
+            return false
+        }
+        if let index {
+            nodes[index] = .node(new)
+        } else {
+            nodes.append(.node(new))
+        }
+    }
+
+    /// The GPU-side counterpart of `remove(_:)`: destroys the VkImage /
+    /// view / memory behind a node this engine built. `remove` only takes
+    /// the node out of the composite list — without this, every node
+    /// rebuild (frame resize) strands a full image on the device. Drains
+    /// the device first so no in-flight frame still references the image.
+    /// The wgpu texture the image was imported from is the canvas's to
+    /// release, after retargeting ThorVG away from it.
+    public func destroyResources(of node: ThorShaderNode) {
+        vkDeviceWaitIdle(device)
+        vkDestroyImageView(device, node.imageView, nil)
+        vkDestroyImage(device, node.image, nil)
+        if let memory = node.memory {
+            vkFreeMemory(device, memory, nil)
+        }
+    }
+
     /// Called at the start of every frame with Δt — mutate nodes / set `dirty`
     /// here to drive animation.
     public var onUpdate: ((Double) -> Void)?
@@ -1021,6 +1060,7 @@ extension VulkanRenderEngine {
             height:               UInt32(height),
             image:                image,
             imageView:            view,
+            memory:               memory,
             storageCapable:       true,
             computePipeline:      computePipeline,
             computeLayout:        computeLayout,
@@ -1175,6 +1215,7 @@ extension VulkanRenderEngine {
             height:               UInt32(height),
             image:                image,
             imageView:            view,
+            memory:               memory,
             isExternallyBacked:   true,
             storageCapable:       storageCapable,
             computePipeline:      computePipeline,

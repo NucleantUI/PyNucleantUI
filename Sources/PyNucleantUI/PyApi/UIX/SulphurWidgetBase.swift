@@ -10,17 +10,8 @@ import SulphurCore
 import SulphurApplication
 import SulphurVulkan
 import Foundation
+import Observation
 
-public final class SulphurFrame: FrameProtocol {
-    public var pos: SIMD2<Double>
-
-    public var size: SIMD2<Double>
-
-    public init(pos: SIMD2<Double>, size: SIMD2<Double>) {
-        self.pos = pos
-        self.size = size
-    }
-}
 
 protocol PyWidgetProtocol: WidgetProtocol, PySerializable {
     var __self__: PyPointer { get }
@@ -56,8 +47,18 @@ extension PyWidgetProtocol {
 public final class SulphurWidgetBase: PyWidgetProtocol, PySerializable, @preconcurrency PyClassProtocol {
 
     var __self__: PyPointer
-
-    public var frame: SulphurFrame?
+    
+    private var _frame: SulphurFrame?
+    public var frame: SulphurFrame? {
+        get { _frame ?? parent?.frame }
+        set {
+            _frame = newValue
+            // Reading back through the getter resolves the parent fallback
+            // when the own frame was just cleared. On a live node canvas
+            // this is what triggers the render-node resize.
+            _canvas?.frame = frame
+        }
+    }
 
     var _canvas: (any PyCanvasBase)?
 
@@ -103,14 +104,16 @@ public final class SulphurWidgetBase: PyWidgetProtocol, PySerializable, @preconc
         self.__self__ = __self__
     }
 
-    /// Single point of canvas replacement: detaches whatever was there
-    /// and wires the owner back-pointer.
+    /// Single point of canvas replacement: detaches whatever was there,
+    /// wires the owner back-pointer, and hands the widget's (or nearest
+    /// ancestor's) frame down so the canvas sizes itself from it.
     private func setCanvas(_ newCanvas: (any PyCanvasBase)?) {
         if let old = _canvas, old !== newCanvas {
             old.detach()
         }
         _canvas = newCanvas
         newCanvas?.owner = self
+        newCanvas?.frame = frame
     }
 
     /// Attach the current canvas right away when the widget is already in
