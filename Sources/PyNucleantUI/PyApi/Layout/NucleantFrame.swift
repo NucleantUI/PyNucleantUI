@@ -23,14 +23,20 @@ import Observation
 /// the whole frame object still goes through the widget's `frame` setter.
 @Observable
 @PyClass
-public final class SulphurFrame: FrameProtocol {
+public final class NucleantFrame: FrameProtocol {
+    
     
     @PyProperty
     public var pos: SIMD2<Double>
     
     @PyProperty
     public var size: SIMD2<Double>
-
+    
+    @PyProperty
+    public var flexible_width: Bool = false
+    
+    @PyProperty
+    public var flexible_height: Bool = false
     
     public init(pos: SIMD2<Double>, size: SIMD2<Double>) {
         self.pos = pos

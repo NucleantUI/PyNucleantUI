@@ -44,12 +44,14 @@ extension PyWidgetProtocol {
 /// canvas or a scene canvas. Drawing is entirely the canvas's business
 /// (its Python hooks live on the canvas object); assign no canvas and the
 /// widget is a pure container for other widgets.
-public final class SulphurWidgetBase: PyWidgetProtocol, PySerializable, @preconcurrency PyClassProtocol {
+public final class NucleantWidgetBase: PyWidgetProtocol, PySerializable, @preconcurrency PyClassProtocol {
+    
+    
 
     var __self__: PyPointer
     
-    private var _frame: SulphurFrame?
-    public var frame: SulphurFrame? {
+    private var _frame: NucleantFrame?
+    public var frame: NucleantFrame? {
         get { _frame ?? parent?.frame }
         set {
             _frame = newValue
@@ -85,9 +87,9 @@ public final class SulphurWidgetBase: PyWidgetProtocol, PySerializable, @preconc
         }
     }
 
-    var children: [SulphurWidgetBase] = []
+    public var children: [NucleantWidgetBase] = []
 
-    weak var parent: SulphurWidgetBase?
+    weak var parent: NucleantWidgetBase?
 
     private weak var engine: VulkanRenderEngine?
     private weak var wgpu: WgpuContext?
@@ -197,7 +199,7 @@ public final class SulphurWidgetBase: PyWidgetProtocol, PySerializable, @preconc
 
     @PyMethod()
     func add_widget(widget: PyPointer) throws {
-        let child: SulphurWidgetBase = try .casted(from: widget)
+        let child: NucleantWidgetBase = try .casted(from: widget)
         child.parent = self
         children.append(child)
         if let engine, let wgpu, let size = attachedSize {
@@ -216,7 +218,7 @@ public final class SulphurWidgetBase: PyWidgetProtocol, PySerializable, @preconc
 
     @PyMethod()
     func remove_widget(widget: PyPointer) throws {
-        let wid: SulphurWidgetBase = try .casted(from: widget)
+        let wid: NucleantWidgetBase = try .casted(from: widget)
         children.removeAll { $0.id == wid.id }
         wid.detachTree()
     }
