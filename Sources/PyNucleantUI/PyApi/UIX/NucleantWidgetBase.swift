@@ -78,8 +78,8 @@ public final class NucleantWidgetBase: PyWidgetProtocol, PySerializable, @precon
                 return
             }
             let assigned: (any PyCanvasBase)? = switch newValue {
-            case PySulphurCanvasBase.PyType: try? PySulphurCanvasBase.casted(unsafe: newValue)
-            case PySulphurSceneBase.PyType: try? PySulphurSceneBase.casted(unsafe: newValue)
+            case ThorCanvasBase.PyType: try? ThorCanvasBase.casted(unsafe: newValue)
+            case ThorSceneBase.PyType: try? ThorSceneBase.casted(unsafe: newValue)
             default: nil
             }
             setCanvas(assigned)

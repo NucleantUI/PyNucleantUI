@@ -1,3 +1,18 @@
+//
+//  ThorCanvasBase.swift
+//  PyNucleantUI
+//
+import SulphurCore
+import SulphurVulkan
+import PySwiftKit
+import CWgpu
+import PySerializing
+import PySwiftWrapper
+import Observation
+import Dispatch
+import Foundation
+
+
 
 /// The canvas that talks to the render node. Owns the whole GPU side of
 /// one widget's 2D content: the `ThorShaderNode` composited by the Vulkan

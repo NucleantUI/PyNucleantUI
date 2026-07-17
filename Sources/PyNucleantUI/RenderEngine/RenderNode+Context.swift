@@ -22,6 +22,7 @@ extension RenderNode {
         case skia(SkiaShaderNode)
         case shader(OGLShaderNode)
         case group(GroupNode)
+        case texture_group(TextureGroupNode)
     }
     
 }

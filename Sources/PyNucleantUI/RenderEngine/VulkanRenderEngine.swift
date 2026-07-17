@@ -431,6 +431,8 @@ public final class VulkanRenderEngine: VulkanContext {
                 update(oGLShaderNode, cmd: cmd)
             case .group(let groupNode):
                 update(groupNode, cmd: cmd)
+            case .texture_group(_):
+                fatalError("TextureGroup not implemented yet")
             }
         }
 

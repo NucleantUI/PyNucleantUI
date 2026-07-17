@@ -1,5 +1,5 @@
 //
-//  SceneBase.swift
+//  ThorSceneBase.swift
 //  SulphurXcodeDemo
 //
 //  The scene flavor of PyCanvasBase: instead of owning a render node, it
