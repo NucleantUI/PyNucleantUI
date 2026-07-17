@@ -28,7 +28,7 @@ extension PyNucleantUI_Package {
             }
             
             static let py_classes: [any (PyClassProtocol & AnyObject).Type] = [
-                SulphurWidgetBase.self,
+                NucleantWidgetBase.self,
                 PySulphurCanvasBase.self,
                 PySulphurSceneBase.self,
                 CanvasShader.self

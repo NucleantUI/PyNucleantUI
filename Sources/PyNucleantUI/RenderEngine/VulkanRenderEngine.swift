@@ -30,19 +30,6 @@ import SulphurApplication
 
 
 
-public final class GroupNode {
-    var nodes: [ThorShaderNode]
-    
-    init(nodes: [ThorShaderNode]) {
-        self.nodes = nodes
-    }
-}
-
-public enum TestRenderNodeEnum {
-    case node(ThorShaderNode)
-    case group(GroupNode)
-}
-
 public enum VulkanEngineError: Error {
     case instance(Int32)
     case surface(Int32)
@@ -90,9 +77,9 @@ public final class VulkanRenderEngine: VulkanContext {
     // MARK: Nodes
 
     /// The slots composited each frame, in array order (later = on top).
-    public var nodes: [TestRenderNodeEnum] = []
+    public var nodes: [RenderNode] = []
 
-    public func append(_ node: TestRenderNodeEnum) {
+    public func append(_ node: RenderNode) {
         nodes.append(node)
     }
 
@@ -101,9 +88,10 @@ public final class VulkanRenderEngine: VulkanContext {
     /// drawing every frame. Groups aren't addressed by this (nothing builds
     /// one yet).
     public func remove(_ node: ThorShaderNode) {
-        let id = ObjectIdentifier(node)
+        let id = ObjectIdentifier(node).hashValue
         nodes.removeAll { entry in
-            if case .node(let n) = entry { return ObjectIdentifier(n) == id }
+            //if case .thor(let n) = entry { return Int(n) == id }
+            entry.id == id
             return false
         }
         nodeSets.removeValue(forKey: id)
@@ -119,7 +107,7 @@ public final class VulkanRenderEngine: VulkanContext {
     /// every sibling; a frame resize must not change stacking order.
     /// Falls back to append when the old node isn't listed.
     public func replace(_ old: ThorShaderNode, with new: ThorShaderNode) {
-        let id = ObjectIdentifier(old)
+        let id = ObjectIdentifier(old).hashValue
         nodeSets.removeValue(forKey: id)
         if let pool = nodeDescriptorPools.removeValue(forKey: id) {
             vkDestroyDescriptorPool(device, pool, nil)
@@ -127,13 +115,13 @@ public final class VulkanRenderEngine: VulkanContext {
         readable.remove(id)
         warnedFailedNodes.remove(id)
         let index = nodes.firstIndex { entry in
-            if case .node(let n) = entry { return ObjectIdentifier(n) == id }
+            //if case .thor(let n) = entry.context { return Int(n) == id }
             return false
         }
         if let index {
-            nodes[index] = .node(new)
+            nodes[index] = .init(id: id.hashValue, context: .thor(new))
         } else {
-            nodes.append(.node(new))
+            nodes.append(.init(id: id.hashValue, context: .thor(new)))
         }
     }
 
@@ -189,16 +177,16 @@ public final class VulkanRenderEngine: VulkanContext {
     /// set gets its own dedicated pool (see `allocateNodeDescriptorSet`) so
     /// MoltenVK never has to pack multiple same-layout sets from one pool —
     /// doing so misaligns every other set's Metal argument-buffer offset.
-    private var nodeSets: [ObjectIdentifier: VkDescriptorSet] = [:]
-    private var nodeDescriptorPools: [ObjectIdentifier: VkDescriptorPool] = [:]
+    private var nodeSets: [Int: VkDescriptorSet] = [:]
+    private var nodeDescriptorPools: [Int: VkDescriptorPool] = [:]
     /// Nodes whose image currently sits in SHADER_READ_ONLY_OPTIMAL.
-    private var readable: Set<ObjectIdentifier> = []
+    private var readable: Set<Int> = []
     /// Nodes we've already logged a draw failure for — ThorVG's Canvas
     /// legitimately (and permanently) returns InsufficientCondition from a
     /// canvas nothing was ever painted into (e.g. a container widget whose
     /// on_canvas only holds children), so this is expected steady-state for
     /// some nodes, not a transient error worth repeating every frame.
-    private var warnedFailedNodes: Set<ObjectIdentifier> = []
+    private var warnedFailedNodes: Set<Int> = []
 
     // MARK: - Init
 
@@ -434,9 +422,13 @@ public final class VulkanRenderEngine: VulkanContext {
 
         // 1. Node content updates (outside the render pass).
         for node in nodes {
-            switch node {
-            case .node(let thorShaderNode):
+            switch node.context {
+            case .thor(let thorShaderNode):
                 update(thorShaderNode, cmd: cmd)
+            case .skia(let skiaShaderNode):
+                update(skiaShaderNode, cmd: cmd)
+            case .shader(let oGLShaderNode):
+                update(oGLShaderNode, cmd: cmd)
             case .group(let groupNode):
                 update(groupNode, cmd: cmd)
             }
@@ -459,14 +451,14 @@ public final class VulkanRenderEngine: VulkanContext {
     // MARK: - Node updates
     private func update(_ group: GroupNode, cmd: VkCommandBuffer) {
         for node in group.nodes {
-            update(node, cmd: cmd)
+            //update(node.context, cmd: cmd)
         }
     }
     /// Draw + sync the node's ThorVG canvas, then barrier the image
     /// (optionally through the node's compute post-process) into
     /// SHADER_READ_ONLY for the composite pass.
     private func update(_ node: ThorShaderNode, cmd: VkCommandBuffer) {
-        let id = ObjectIdentifier(node)
+        let id = ObjectIdentifier(node).hashValue
         guard node.dirty else { return }
         let drawResult = node.canvas.draw()
         let syncResult = drawResult == TVG_RESULT_SUCCESS ? node.canvas.sync() : drawResult
@@ -564,9 +556,9 @@ public final class VulkanRenderEngine: VulkanContext {
         let scissor = VkRect2D(offset: VkOffset2D(x: 0, y: 0), extent: extent)
 
         for node in nodes {
-            switch node {
-            case .node(let thorShaderNode):
-                guard readable.contains(ObjectIdentifier(thorShaderNode)),
+            switch node.context {
+            case .thor(let thorShaderNode):
+                guard readable.contains(node.id),
                       let set = descriptorSet(for: thorShaderNode) else { continue }
                 composite.record(
                     commandBuffer: cmd,
@@ -574,16 +566,16 @@ public final class VulkanRenderEngine: VulkanContext {
                     viewport:      viewport,
                     scissor:       scissor
                 )
-            case .group(let groupNode):
+            default:
                 continue
             }
         }
 
         vkCmdEndRenderPass(cmd)
     }
-
+    // TODO: we should not used ObjectIdentifier anymore always just Int / Hash
     private func descriptorSet(for node: ThorShaderNode) -> VkDescriptorSet? {
-        let id = ObjectIdentifier(node)
+        let id = ObjectIdentifier(node).hashValue
         if let set = nodeSets[id] { return set }
         guard let allocated = try? composite.allocateNodeDescriptorSet() else { return nil }
         composite.updateDescriptorSet(allocated.set, imageViews: [node.imageView])

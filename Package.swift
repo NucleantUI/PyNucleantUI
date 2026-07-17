@@ -23,7 +23,9 @@ let package = Package(
         .package(path: "/Volumes/CodeSSD/dev_projects/sulphur_dev/SulphurUI"),
         .package(path: "/Volumes/CodeSSD/dev_projects/sulphur_dev/SulphurVulkan"),
         .package(path: "/Volumes/CodeSSD/dev_projects/sulphur_dev/SulphurShader"),
-        .package(path: "/Volumes/CodeSSD/dev_projects/pyswiftkit/PySwiftKit")
+        .package(path: "/Volumes/CodeSSD/dev_projects/pyswiftkit/PySwiftKit"),
+        .package(url: "https://github.com/Py-Swift/SwiftyKvLang", branch: "master"),
+        .package(url: "https://github.com/Py-Swift/PySwiftAST.git", branch: "master")
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -36,6 +38,7 @@ let package = Package(
             name: "PyNucleantUI",
             dependencies: [
                 "CWgpu",
+                "KvLangBuilder",
                 .product(name: "SulphurCore", package: "SulphurCore"),
                 .product(name: "SulphurApplication", package: "SulphurCore"),
                 .product(name: "SulphurUI", package: "SulphurUI"),
@@ -50,6 +53,24 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("Python")
             ]
+        ),
+        .target(
+            name: "KvLangBuilder",
+            dependencies: [
+                .product(name: "SulphurCore", package: "SulphurCore"),
+                .product(name: "SulphurApplication", package: "SulphurCore"),
+                .product(name: "SulphurUI", package: "SulphurUI"),
+                .product(name: "SulphurVulkan", package: "SulphurVulkan"),
+                .product(name: "VulkanCore", package: "SulphurVulkan"),
+                .product(name: "SulphurShader", package: "SulphurShader"),
+                .product(name: "PySwiftKit", package: "PySwiftKit"),
+                .product(name: "KvParser", package: "SwiftyKvLang"),
+                .product(name: "KivyWidgetRegistry", package: "SwiftyKvLang"),
+                .product(name: "PySwiftAST", package: "PySwiftAST")
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ],
         ),
         .testTarget(
             name: "PyNucleantUITests",

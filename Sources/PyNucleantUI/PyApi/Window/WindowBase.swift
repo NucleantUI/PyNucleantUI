@@ -50,7 +50,7 @@ final class WindowBase: PyDeserialize {
     
     var platformWindow: PlatformWindow?
     var renderEngine: VulkanRenderEngine?
-    var rootWidget: SulphurWidgetBase?
+    var rootWidget: NucleantWidgetBase?
     
     var win_rect: SIMD4<Int>
     
@@ -129,7 +129,7 @@ final class WindowBase: PyDeserialize {
 
 extension WindowBase {
     
-    @PyCallMethod(path: \Self.__self__) func on_build() throws -> SulphurWidgetBase?
+    @PyCallMethod(path: \Self.__self__) func on_build() throws -> NucleantWidgetBase?
     @PyCallMethod(path: \Self.__self__) func on_frame(dt: Double)
     @PyCallMethod(path: \Self.__self__) func on_mouse_down(x: Double, y: Double)
     @PyCallMethod(path: \Self.__self__) func on_mouse_up(x: Double, y: Double)

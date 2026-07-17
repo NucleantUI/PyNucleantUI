@@ -90,3 +90,7 @@ public final class ThorShaderNode: VulkanThorRenderNode {
         self.computeDescriptorSet = computeDescriptorSet
     }
 }
+
+
+public typealias SkiaShaderNode = ThorShaderNode
+public typealias OGLShaderNode = ThorShaderNode

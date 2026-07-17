@@ -1,6 +1,15 @@
 {
-  "originHash" : "5a60ee894f5374128b69adc92b62fcdaa9991bd6000a2487c09e351ae700676a",
+  "originHash" : "82096b6385a0349cc3289bbd767e0b1f64fde647bca8d8827a7fff0bef1f2118",
   "pins" : [
+    {
+      "identity" : "pyswiftast",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Py-Swift/PySwiftAST.git",
+      "state" : {
+        "branch" : "master",
+        "revision" : "c757b0d9e7975b59d3c670fea8a99b043e2cb4ba"
+      }
+    },
     {
       "identity" : "swift-syntax",
       "kind" : "remoteSourceControl",
@@ -8,6 +17,15 @@
       "state" : {
         "revision" : "4799286537280063c85a32f09884cfbca301b1a1",
         "version" : "602.0.0"
+      }
+    },
+    {
+      "identity" : "swiftykvlang",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Py-Swift/SwiftyKvLang",
+      "state" : {
+        "branch" : "master",
+        "revision" : "6c462bbddc8e862103f4db1991684d28756e5e48"
       }
     }
   ],

@@ -23,14 +23,14 @@ public protocol PyCanvasBase: PySerializable, PyClassProtocol, AnyObject {
     /// The widget holding this canvas. Canvases record their owner and
     /// widgets their parent — that chain is how nested scene canvases find
     /// the canvas they composite through.
-    var owner: SulphurWidgetBase? { get set }
+    var owner: NucleantWidgetBase? { get set }
 
     /// The frame that sizes this canvas — handed down by the owner widget
     /// on assignment and on every later frame change. nil keeps the old
     /// behavior: adapt to the attach-time (nearest parent) size. Node
     /// canvases rebuild their render node to match; scene canvases only
     /// record it — their pixels live on the host's node.
-    var frame: SulphurFrame? { get set }
+    var frame: NucleantFrame? { get set }
 
     /// Bind into the render pipeline. Node canvases build (or adopt
     /// `ownNode`) their render node here; scene canvases resolve the
@@ -83,8 +83,8 @@ public final class PySulphurCanvasBase: PyCanvasBase, ThorGPUCanvas, PyCapsulePr
     /// drops its own reference.
     public var postShader: CanvasShader?
     
-    private weak var _frame: SulphurFrame?
-    public var frame: SulphurFrame? {
+    private weak var _frame: NucleantFrame?
+    public var frame: NucleantFrame? {
         get { _frame }
         set {
             _frame = newValue
@@ -124,8 +124,8 @@ public final class PySulphurCanvasBase: PyCanvasBase, ThorGPUCanvas, PyCapsulePr
         }
     }
 
-    private weak var _owner: SulphurWidgetBase?
-    public var owner: SulphurWidgetBase? {
+    private weak var _owner: NucleantWidgetBase?
+    public var owner: NucleantWidgetBase? {
         get { _owner }
         set {
             _owner = newValue
@@ -261,7 +261,8 @@ public final class PySulphurCanvasBase: PyCanvasBase, ThorGPUCanvas, PyCapsulePr
             }
             node        = built.node
             thorTexture = built.texture
-            engine.append(.node(built.node))
+            // TODO: as before we should use proper hash as id that both sides uses
+            engine.append(.init(id: ObjectIdentifier( built.node).hashValue, context: .thor(built.node)))
         } else if let frame = _frame {
             // Already-built node re-attaching under a frame that changed
             // while detached — same path as a live frame change.

@@ -27,12 +27,12 @@ public final class PySulphurSceneBase: PyCanvasBase {
     /// The wrapped ThorVG paint (usually a scene).
     public private(set) var paint: Tvg_Paint?
 
-    public weak var owner: SulphurWidgetBase?
+    public weak var owner: NucleantWidgetBase?
 
     /// Recorded to satisfy the canvas contract, nothing more yet — a scene
     /// renders at whatever size its host node has. The obvious next use is
     /// translating the wrapped paint by `frame.pos`.
-    public weak var frame: SulphurFrame?
+    public weak var frame: NucleantFrame?
 
     /// The canvas this scene's paint currently lives on. Weak: the host
     /// belongs to its own widget, this is only the record for detach.
