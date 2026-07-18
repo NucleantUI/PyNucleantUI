@@ -140,6 +140,20 @@ public final class VulkanRenderEngine: VulkanContext {
         }
     }
 
+    /// Same contract for a CPU-fed node — plus its staging buffer, which
+    /// is persistently mapped and must be unmapped before the free.
+    public func destroyResources(of node: PixelBufferShaderNode) {
+        vkDeviceWaitIdle(device)
+        vkUnmapMemory(device, node.stagingMemory)
+        vkDestroyBuffer(device, node.stagingBuffer, nil)
+        vkFreeMemory(device, node.stagingMemory, nil)
+        vkDestroyImageView(device, node.imageView, nil)
+        vkDestroyImage(device, node.image, nil)
+        if let memory = node.memory {
+            vkFreeMemory(device, memory, nil)
+        }
+    }
+
     /// Called at the start of every frame with Δt — mutate nodes / set `dirty`
     /// here to drive animation.
     public var onUpdate: ((Double) -> Void)?
@@ -451,6 +465,8 @@ public final class VulkanRenderEngine: VulkanContext {
             update(skiaShaderNode, slot: node, cmd: cmd)
         case .shader(let oGLShaderNode):
             update(oGLShaderNode, slot: node, cmd: cmd)
+        case .pixel_buffer(let pixelBufferShaderNode):
+            update(pixelBufferShaderNode, slot: node, cmd: cmd)
         case .group(let groupNode):
             update(groupNode, cmd: cmd)
         case .texture_group(_):
@@ -597,6 +613,100 @@ public final class VulkanRenderEngine: VulkanContext {
         //   something actually drives updates.
     }
 
+    /// The CPU-fed counterpart of the thor update: instead of a ThorVG
+    /// draw, the node's staged pixels are copied into its image, then
+    /// (optionally) run through the compute post shader — same barrier
+    /// choreography, TRANSFER standing in for the canvas draw. Without a
+    /// first `write` the node has no content and stays unpublished.
+    private func update(_ node: PixelBufferShaderNode, slot: RenderNode, cmd: VkCommandBuffer) {
+        guard slot.needsRender, node.hasContent else { return }
+
+        // This frame slot's fence was waited at the top of drawFrame — the
+        // staging slice indexed by it is provably idle, so the CPU copy
+        // here can't race the previous frame's GPU read.
+        node.stage(into: frameIndex)
+
+        // First upload ever: the image is still UNDEFINED and fully
+        // overwritten by the copy, so discarding is correct. Afterwards
+        // the real prior state is "composite sampled it last frame".
+        let firstUpload = node.currentLayout == VK_IMAGE_LAYOUT_UNDEFINED
+        engineImageBarrier(
+            cmd,
+            image:     node.image,
+            srcLayout: node.currentLayout,
+            srcAccess: firstUpload ? 0 : VkAccessFlags(VK_ACCESS_SHADER_READ_BIT.rawValue),
+            srcStage:  firstUpload ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            dstLayout: VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            dstAccess: VkAccessFlags(VK_ACCESS_TRANSFER_WRITE_BIT.rawValue),
+            dstStage:  VK_PIPELINE_STAGE_TRANSFER_BIT
+        )
+
+        var region = VkBufferImageCopy()
+        region.bufferOffset = VkDeviceSize(node.stagingOffset(of: frameIndex))
+        // bufferRowLength/bufferImageHeight 0 = tightly packed.
+        region.imageSubresource = VkImageSubresourceLayers(
+            aspectMask:     VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue),
+            mipLevel:       0,
+            baseArrayLayer: 0,
+            layerCount:     1
+        )
+        region.imageExtent = VkExtent3D(width: node.width, height: node.height, depth: 1)
+        vkCmdCopyBufferToImage(
+            cmd,
+            node.stagingBuffer,
+            node.image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1,
+            &region
+        )
+
+        if let pipeline = node.computePipeline,
+           let layout   = node.computeLayout,
+           let ds       = node.computeDescriptorSet {
+
+            engineImageBarrier(
+                cmd,
+                image:     node.image,
+                srcLayout: VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                srcAccess: VkAccessFlags(VK_ACCESS_TRANSFER_WRITE_BIT.rawValue),
+                srcStage:  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                dstLayout: VK_IMAGE_LAYOUT_GENERAL,
+                dstAccess: VkAccessFlags(VK_ACCESS_SHADER_READ_BIT.rawValue) | VkAccessFlags(VK_ACCESS_SHADER_WRITE_BIT.rawValue),
+                dstStage:  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            )
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline)
+            var descSet: VkDescriptorSet? = ds
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &descSet, 0, nil)
+            vkCmdDispatch(cmd, (node.width + 7) / 8, (node.height + 7) / 8, 1)
+            engineImageBarrier(
+                cmd,
+                image:     node.image,
+                srcLayout: VK_IMAGE_LAYOUT_GENERAL,
+                srcAccess: VkAccessFlags(VK_ACCESS_SHADER_WRITE_BIT.rawValue),
+                srcStage:  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                dstLayout: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                dstAccess: VkAccessFlags(VK_ACCESS_SHADER_READ_BIT.rawValue),
+                dstStage:  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+            )
+        } else {
+            engineImageBarrier(
+                cmd,
+                image:     node.image,
+                srcLayout: VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                srcAccess: VkAccessFlags(VK_ACCESS_TRANSFER_WRITE_BIT.rawValue),
+                srcStage:  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                dstLayout: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                dstAccess: VkAccessFlags(VK_ACCESS_SHADER_READ_BIT.rawValue),
+                dstStage:  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+            )
+        }
+        node.currentLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        readable.insert(slot.id)
+        // slot.needsRender = false
+        // ^ same as the other updates: kept permanently dirty until the
+        //   producer side drives updates through the Observation chain.
+    }
+
     // MARK: - Composite pass
 
     private func recordCompositePass(cmd: VkCommandBuffer, imageIndex: Int) {
@@ -646,6 +756,8 @@ public final class VulkanRenderEngine: VulkanContext {
             imageView = skiaShaderNode.imageView
         case .shader(let oGLShaderNode):
             imageView = oGLShaderNode.imageView
+        case .pixel_buffer(let pixelBufferShaderNode):
+            imageView = pixelBufferShaderNode.imageView
         case .group(let groupNode):
             for child in groupNode.nodes {
                 recordComposite(of: child, cmd: cmd, viewport: viewport, scissor: scissor)
@@ -1305,6 +1417,118 @@ extension VulkanRenderEngine {
             computePipeline:      computePipeline,
             computeLayout:        computeLayout,
             computeDescriptorSet: computeDescriptorSet
+        )
+    }
+
+    /// Create a CPU-fed upload node: an engine-owned RGBA8 image (TRANSFER_DST
+    /// + SAMPLED + STORAGE) and a persistently-mapped host-visible staging
+    /// buffer with one slice per frame-in-flight. The image starts UNDEFINED —
+    /// the node's first upload overwrites every texel, and until that first
+    /// `write` the engine keeps it out of the composite entirely. The engine
+    /// does not own the resources — `destroyResources(of:)` when dropping it.
+    public func makePixelBufferNode(width: Int, height: Int) throws -> PixelBufferShaderNode {
+        var image: VkImage?
+        var imageInfo = VkImageCreateInfo()
+        imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+        imageInfo.imageType     = VK_IMAGE_TYPE_2D
+        imageInfo.format        = VK_FORMAT_R8G8B8A8_UNORM
+        imageInfo.extent        = VkExtent3D(width: UInt32(width), height: UInt32(height), depth: 1)
+        imageInfo.mipLevels     = 1
+        imageInfo.arrayLayers   = 1
+        imageInfo.samples       = VK_SAMPLE_COUNT_1_BIT
+        imageInfo.tiling        = VK_IMAGE_TILING_OPTIMAL
+        imageInfo.usage         = VkImageUsageFlags(
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT.rawValue |
+            VK_IMAGE_USAGE_SAMPLED_BIT.rawValue |
+            VK_IMAGE_USAGE_STORAGE_BIT.rawValue
+        )
+        imageInfo.sharingMode   = VK_SHARING_MODE_EXCLUSIVE
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+        guard vkCreateImage(device, &imageInfo, nil, &image) == VK_SUCCESS, let image else {
+            throw VulkanEngineError.image
+        }
+
+        var requirements = VkMemoryRequirements()
+        vkGetImageMemoryRequirements(device, image, &requirements)
+        var memory: VkDeviceMemory?
+        var allocInfo = VkMemoryAllocateInfo()
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+        allocInfo.allocationSize = requirements.size
+        allocInfo.memoryTypeIndex = findMemoryType(
+            typeFilter: requirements.memoryTypeBits,
+            properties: VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)
+        )
+        guard vkAllocateMemory(device, &allocInfo, nil, &memory) == VK_SUCCESS else {
+            throw VulkanEngineError.memory
+        }
+        vkBindImageMemory(device, image, memory, 0)
+
+        var view: VkImageView?
+        var viewInfo = VkImageViewCreateInfo()
+        viewInfo.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+        viewInfo.image    = image
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D
+        viewInfo.format   = VK_FORMAT_R8G8B8A8_UNORM
+        viewInfo.subresourceRange = VkImageSubresourceRange(
+            aspectMask:     VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue),
+            baseMipLevel:   0, levelCount: 1,
+            baseArrayLayer: 0, layerCount: 1
+        )
+        guard vkCreateImageView(device, &viewInfo, nil, &view) == VK_SUCCESS, let view else {
+            throw VulkanEngineError.image
+        }
+
+        // Staging: one buffer holding `imageCount` frame slices, HOST_VISIBLE
+        // + HOST_COHERENT (no flush bookkeeping), mapped for the node's whole
+        // lifetime.
+        let bytesPerFrame = width * height * 4
+        let stagingSize   = VkDeviceSize(bytesPerFrame * imageCount)
+        var stagingBuffer: VkBuffer?
+        var bufferInfo = VkBufferCreateInfo()
+        bufferInfo.sType       = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
+        bufferInfo.size        = stagingSize
+        bufferInfo.usage       = VkBufferUsageFlags(VK_BUFFER_USAGE_TRANSFER_SRC_BIT.rawValue)
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE
+        guard vkCreateBuffer(device, &bufferInfo, nil, &stagingBuffer) == VK_SUCCESS,
+              let stagingBuffer else {
+            throw VulkanEngineError.image
+        }
+
+        var stagingRequirements = VkMemoryRequirements()
+        vkGetBufferMemoryRequirements(device, stagingBuffer, &stagingRequirements)
+        var stagingMemory: VkDeviceMemory?
+        var stagingAlloc = VkMemoryAllocateInfo()
+        stagingAlloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+        stagingAlloc.allocationSize = stagingRequirements.size
+        stagingAlloc.memoryTypeIndex = findMemoryType(
+            typeFilter: stagingRequirements.memoryTypeBits,
+            properties: VkMemoryPropertyFlags(
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT.rawValue |
+                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT.rawValue
+            )
+        )
+        guard vkAllocateMemory(device, &stagingAlloc, nil, &stagingMemory) == VK_SUCCESS,
+              let stagingMemory else {
+            throw VulkanEngineError.memory
+        }
+        vkBindBufferMemory(device, stagingBuffer, stagingMemory, 0)
+
+        var mapped: UnsafeMutableRawPointer?
+        guard vkMapMemory(device, stagingMemory, 0, stagingSize, 0, &mapped) == VK_SUCCESS,
+              let mapped else {
+            throw VulkanEngineError.memory
+        }
+
+        return PixelBufferShaderNode(
+            width:          UInt32(width),
+            height:         UInt32(height),
+            image:          image,
+            imageView:      view,
+            memory:         memory,
+            stagingBuffer:  stagingBuffer,
+            stagingMemory:  stagingMemory,
+            stagingPointer: mapped,
+            sliceCount:     imageCount
         )
     }
 

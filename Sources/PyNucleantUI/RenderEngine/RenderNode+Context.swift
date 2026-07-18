@@ -21,6 +21,7 @@ extension RenderNode {
         case thor(ThorShaderNode)
         case skia(SkiaShaderNode)
         case shader(OGLShaderNode)
+        case pixel_buffer(PixelBufferShaderNode)
         case group(GroupNode)
         case texture_group(TextureGroupNode)
     }

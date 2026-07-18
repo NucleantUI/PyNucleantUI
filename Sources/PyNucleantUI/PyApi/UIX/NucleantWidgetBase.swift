@@ -64,6 +64,18 @@ public final class NucleantWidgetBase: PyWidgetProtocol, PySerializable, @precon
 
     var _canvas: (any PyCanvasBase)?
 
+    /// Owned reference to `_canvas`'s Python shell. The Swift canvas
+    /// instance is owned by its Python object (tp_init stores it, dealloc
+    /// releases it) — holding only the Swift side lets a
+    /// `w.canvas = PixelBufferCanvasBase(...)` temporary die at the end of
+    /// the statement, and the shell's dealloc (plus a later zombie
+    /// resurrection through the getter's `newRef`) over-releases the Swift
+    /// instance `_canvas` still points at → SIGSEGV in
+    /// swift_unknownObjectRetain on the next tree attach. Tetris only
+    /// survived because its game object happens to keep the Python canvas
+    /// alive. Retained in `setCanvas`, released on replacement and deinit.
+    private var _canvasPyRef: PyPointer?
+
     /// The widget's canvas slot as Python sees it. Assign any canvas kind
     /// — `PySulphurCanvasBase` or `PySulphurSceneBase` — or None to
     /// detach. Typed `PyPointer` because the macro can't deserialize an
@@ -80,6 +92,7 @@ public final class NucleantWidgetBase: PyWidgetProtocol, PySerializable, @precon
             let assigned: (any PyCanvasBase)? = switch newValue {
             case ThorCanvasBase.PyType: try? ThorCanvasBase.casted(unsafe: newValue)
             case ThorSceneBase.PyType: try? ThorSceneBase.casted(unsafe: newValue)
+            case PixelBufferCanvasBase.PyType: try? PixelBufferCanvasBase.casted(unsafe: newValue)
             default: nil
             }
             setCanvas(assigned)
@@ -106,6 +119,10 @@ public final class NucleantWidgetBase: PyWidgetProtocol, PySerializable, @precon
         self.__self__ = __self__
     }
 
+    deinit {
+        _canvasPyRef?.decRef()
+    }
+
     /// Single point of canvas replacement: detaches whatever was there,
     /// wires the owner back-pointer, and hands the widget's (or nearest
     /// ancestor's) frame down so the canvas sizes itself from it.
@@ -113,6 +130,12 @@ public final class NucleantWidgetBase: PyWidgetProtocol, PySerializable, @precon
         if let old = _canvas, old !== newCanvas {
             old.detach()
         }
+        // Keep the Python shell alive alongside the Swift instance — see
+        // `_canvasPyRef`. `pyPointer()` returns +1 (`__self__.newRef`),
+        // taken here while the setter still borrows the object, i.e.
+        // before the caller's temporary can die.
+        _canvasPyRef?.decRef()
+        _canvasPyRef = newCanvas?.pyPointer()
         _canvas = newCanvas
         newCanvas?.owner = self
         newCanvas?.frame = frame

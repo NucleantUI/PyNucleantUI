@@ -57,6 +57,8 @@ public final class RenderNode {
             observe(node)
         case .shader(let node):
             observe(node)
+        case .pixel_buffer(let node):
+            observe(node)
         case .group, .texture_group:
             // No observable payload of their own — a group's children are
             // RenderNodes tracking themselves, and texture groups aren't

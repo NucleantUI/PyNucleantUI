@@ -50,7 +50,12 @@ public final class CanvasShader: PyDeserialize {
     }
 
     private weak var engine: VulkanRenderEngine?
-    private var node: ThorShaderNode?
+    // private var node: ThorShaderNode?
+    // ^ widened to the node protocol: the post pipeline only needs the
+    //   compute trio + imageView + storageCapable, all protocol members
+    //   now — so the same Python shader object installs on a
+    //   PixelBufferShaderNode (NES PPU) exactly like on a thor canvas.
+    private var node: (any VulkanRenderNode)?
     private var post: CanvasPostPipeline?
 
     @PyInit
@@ -60,7 +65,7 @@ public final class CanvasShader: PyDeserialize {
 
     /// Bind this shader to a live render node — called by
     /// `SulphurCanvasBase.add_shader` once the canvas has its node.
-    func attach(engine: VulkanRenderEngine, node: ThorShaderNode) throws {
+    func attach(engine: VulkanRenderEngine, node: any VulkanRenderNode) throws {
         self.engine = engine
         self.node = node
         try rebuildOrThrow()
