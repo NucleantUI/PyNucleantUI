@@ -27,8 +27,18 @@ import Observation
 @Observable
 public final class PixelBufferShaderNode: VulkanRenderNode {
 
+    /// Size of `image` — the surface shaders and the composite see.
+    /// This is `sourceWidth/Height × scale`.
     public let width:  UInt32
     public let height: UInt32
+
+    /// Content resolution the producer `write`s (e.g. 256×240 for a NES).
+    /// With `scale` > 1 the upload path nearest-blits these pixels up
+    /// into the scale×-larger `image`, so the producer never pays for
+    /// the magnification — a post shader gets real subpixels for free.
+    public let sourceWidth:  UInt32
+    public let sourceHeight: UInt32
+    public let scale:        UInt32
 
     public let image:     VkImage
     public let imageView: VkImageView
@@ -36,13 +46,23 @@ public final class PixelBufferShaderNode: VulkanRenderNode {
     /// node down, same contract as `ThorShaderNode.memory`.
     public let memory:    VkDeviceMemory?
 
+    /// Intermediate upload target at source resolution — the blit source
+    /// feeding `image`. Nil at scale 1, where staging copies straight
+    /// into `image` exactly as before scaling existed.
+    public let uploadImage:  VkImage?
+    public let uploadMemory: VkDeviceMemory?
+    /// Vulkan-tracked layout of `uploadImage`, same stale-oldLayout
+    /// contract as `currentLayout`.
+    var uploadLayout: VkImageLayout = VK_IMAGE_LAYOUT_UNDEFINED
+
     /// Host-visible upload buffer, one slice per frame-in-flight so the
     /// CPU never rewrites bytes an in-flight copy still reads. Mapped
     /// once at creation and unmapped only at teardown.
     public let stagingBuffer: VkBuffer
     public let stagingMemory: VkDeviceMemory
     let stagingPointer:       UnsafeMutableRawPointer
-    /// Bytes of one full frame (width × height × 4, tightly packed RGBA8).
+    /// Bytes of one full *source* frame (sourceWidth × sourceHeight × 4,
+    /// tightly packed RGBA8) — staging and `write` deal in source pixels.
     public let bytesPerFrame: Int
     let stagingSliceCount:    Int
 
@@ -73,27 +93,35 @@ public final class PixelBufferShaderNode: VulkanRenderNode {
     private var pixels: [UInt8]
 
     init(
-        width:          UInt32,
-        height:         UInt32,
+        sourceWidth:    UInt32,
+        sourceHeight:   UInt32,
+        scale:          UInt32,
         image:          VkImage,
         imageView:      VkImageView,
         memory:         VkDeviceMemory?,
+        uploadImage:    VkImage?,
+        uploadMemory:   VkDeviceMemory?,
         stagingBuffer:  VkBuffer,
         stagingMemory:  VkDeviceMemory,
         stagingPointer: UnsafeMutableRawPointer,
         sliceCount:     Int
     ) {
-        self.width             = width
-        self.height            = height
+        self.sourceWidth       = sourceWidth
+        self.sourceHeight      = sourceHeight
+        self.scale             = max(scale, 1)
+        self.width             = sourceWidth  * self.scale
+        self.height            = sourceHeight * self.scale
         self.image             = image
         self.imageView         = imageView
         self.memory            = memory
+        self.uploadImage       = uploadImage
+        self.uploadMemory      = uploadMemory
         self.stagingBuffer     = stagingBuffer
         self.stagingMemory     = stagingMemory
         self.stagingPointer    = stagingPointer
-        self.bytesPerFrame     = Int(width) * Int(height) * 4
+        self.bytesPerFrame     = Int(sourceWidth) * Int(sourceHeight) * 4
         self.stagingSliceCount = max(sliceCount, 1)
-        self.pixels            = [UInt8](repeating: 0, count: Int(width) * Int(height) * 4)
+        self.pixels            = [UInt8](repeating: 0, count: self.bytesPerFrame)
     }
 
     /// Hand a full frame of tightly-packed RGBA8 bytes to the node.

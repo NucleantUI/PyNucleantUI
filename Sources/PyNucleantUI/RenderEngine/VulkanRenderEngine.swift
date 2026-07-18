@@ -141,7 +141,8 @@ public final class VulkanRenderEngine: VulkanContext {
     }
 
     /// Same contract for a CPU-fed node — plus its staging buffer, which
-    /// is persistently mapped and must be unmapped before the free.
+    /// is persistently mapped and must be unmapped before the free, and
+    /// the source-sized upload image a scaled node blits through.
     public func destroyResources(of node: PixelBufferShaderNode) {
         vkDeviceWaitIdle(device)
         vkUnmapMemory(device, node.stagingMemory)
@@ -151,6 +152,12 @@ public final class VulkanRenderEngine: VulkanContext {
         vkDestroyImage(device, node.image, nil)
         if let memory = node.memory {
             vkFreeMemory(device, memory, nil)
+        }
+        if let uploadImage = node.uploadImage {
+            vkDestroyImage(device, uploadImage, nil)
+        }
+        if let uploadMemory = node.uploadMemory {
+            vkFreeMemory(device, uploadMemory, nil)
         }
     }
 
@@ -641,24 +648,80 @@ public final class VulkanRenderEngine: VulkanContext {
             dstStage:  VK_PIPELINE_STAGE_TRANSFER_BIT
         )
 
-        var region = VkBufferImageCopy()
-        region.bufferOffset = VkDeviceSize(node.stagingOffset(of: frameIndex))
-        // bufferRowLength/bufferImageHeight 0 = tightly packed.
-        region.imageSubresource = VkImageSubresourceLayers(
+        let colorLayers = VkImageSubresourceLayers(
             aspectMask:     VkImageAspectFlags(VK_IMAGE_ASPECT_COLOR_BIT.rawValue),
             mipLevel:       0,
             baseArrayLayer: 0,
             layerCount:     1
         )
-        region.imageExtent = VkExtent3D(width: node.width, height: node.height, depth: 1)
-        vkCmdCopyBufferToImage(
-            cmd,
-            node.stagingBuffer,
-            node.image,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            1,
-            &region
-        )
+        var region = VkBufferImageCopy()
+        region.bufferOffset = VkDeviceSize(node.stagingOffset(of: frameIndex))
+        // bufferRowLength/bufferImageHeight 0 = tightly packed.
+        region.imageSubresource = colorLayers
+        region.imageExtent = VkExtent3D(width: node.sourceWidth, height: node.sourceHeight, depth: 1)
+
+        if let uploadImage = node.uploadImage {
+            // Scaled path: staging lands in the source-sized upload image,
+            // then a nearest blit stretches it into the scale×-larger node
+            // image — the GPU does the pixel replication the producer no
+            // longer pays for. After the first frame the upload image's
+            // prior state is "blit read it", hence TRANSFER_SRC.
+            let firstSmall = node.uploadLayout == VK_IMAGE_LAYOUT_UNDEFINED
+            engineImageBarrier(
+                cmd,
+                image:     uploadImage,
+                srcLayout: node.uploadLayout,
+                srcAccess: firstSmall ? 0 : VkAccessFlags(VK_ACCESS_TRANSFER_READ_BIT.rawValue),
+                srcStage:  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                dstLayout: VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                dstAccess: VkAccessFlags(VK_ACCESS_TRANSFER_WRITE_BIT.rawValue),
+                dstStage:  VK_PIPELINE_STAGE_TRANSFER_BIT
+            )
+            vkCmdCopyBufferToImage(
+                cmd,
+                node.stagingBuffer,
+                uploadImage,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                1,
+                &region
+            )
+            engineImageBarrier(
+                cmd,
+                image:     uploadImage,
+                srcLayout: VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                srcAccess: VkAccessFlags(VK_ACCESS_TRANSFER_WRITE_BIT.rawValue),
+                srcStage:  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                dstLayout: VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                dstAccess: VkAccessFlags(VK_ACCESS_TRANSFER_READ_BIT.rawValue),
+                dstStage:  VK_PIPELINE_STAGE_TRANSFER_BIT
+            )
+            node.uploadLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+
+            var blit = VkImageBlit()
+            blit.srcSubresource = colorLayers
+            blit.srcOffsets.1   = VkOffset3D(x: Int32(node.sourceWidth), y: Int32(node.sourceHeight), z: 1)
+            blit.dstSubresource = colorLayers
+            blit.dstOffsets.1   = VkOffset3D(x: Int32(node.width), y: Int32(node.height), z: 1)
+            vkCmdBlitImage(
+                cmd,
+                uploadImage,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                node.image,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                1,
+                &blit,
+                VK_FILTER_NEAREST
+            )
+        } else {
+            vkCmdCopyBufferToImage(
+                cmd,
+                node.stagingBuffer,
+                node.image,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                1,
+                &region
+            )
+        }
 
         if let pipeline = node.computePipeline,
            let layout   = node.computeLayout,
@@ -1426,13 +1489,22 @@ extension VulkanRenderEngine {
     /// the node's first upload overwrites every texel, and until that first
     /// `write` the engine keeps it out of the composite entirely. The engine
     /// does not own the resources — `destroyResources(of:)` when dropping it.
-    public func makePixelBufferNode(width: Int, height: Int) throws -> PixelBufferShaderNode {
+    ///
+    /// `scale` > 1 sizes the node's image at width/height × scale while the
+    /// producer keeps writing source-sized frames: the upload lands in an
+    /// intermediate source-sized image first and a nearest `vkCmdBlitImage`
+    /// stretches it up — so a post shader (e.g. a pixel-art AA upscaler)
+    /// gets real subpixels without the producer replicating a single pixel.
+    /// At scale 1 no intermediate image exists and the path is exactly the
+    /// old direct copy.
+    public func makePixelBufferNode(width: Int, height: Int, scale: Int = 1) throws -> PixelBufferShaderNode {
+        let scale = max(scale, 1)
         var image: VkImage?
         var imageInfo = VkImageCreateInfo()
         imageInfo.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
         imageInfo.imageType     = VK_IMAGE_TYPE_2D
         imageInfo.format        = VK_FORMAT_R8G8B8A8_UNORM
-        imageInfo.extent        = VkExtent3D(width: UInt32(width), height: UInt32(height), depth: 1)
+        imageInfo.extent        = VkExtent3D(width: UInt32(width * scale), height: UInt32(height * scale), depth: 1)
         imageInfo.mipLevels     = 1
         imageInfo.arrayLayers   = 1
         imageInfo.samples       = VK_SAMPLE_COUNT_1_BIT
@@ -1462,6 +1534,37 @@ extension VulkanRenderEngine {
             throw VulkanEngineError.memory
         }
         vkBindImageMemory(device, image, memory, 0)
+
+        // The blit source at source resolution — only needed when scaling.
+        // TRANSFER_DST (staging copy in) + TRANSFER_SRC (blit out); no view,
+        // nothing ever samples it directly.
+        var uploadImage:  VkImage?
+        var uploadMemory: VkDeviceMemory?
+        if scale > 1 {
+            var upInfo = imageInfo
+            upInfo.extent = VkExtent3D(width: UInt32(width), height: UInt32(height), depth: 1)
+            upInfo.usage  = VkImageUsageFlags(
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT.rawValue |
+                VK_IMAGE_USAGE_TRANSFER_SRC_BIT.rawValue
+            )
+            guard vkCreateImage(device, &upInfo, nil, &uploadImage) == VK_SUCCESS,
+                  let created = uploadImage else {
+                throw VulkanEngineError.image
+            }
+            var upRequirements = VkMemoryRequirements()
+            vkGetImageMemoryRequirements(device, created, &upRequirements)
+            var upAlloc = VkMemoryAllocateInfo()
+            upAlloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+            upAlloc.allocationSize = upRequirements.size
+            upAlloc.memoryTypeIndex = findMemoryType(
+                typeFilter: upRequirements.memoryTypeBits,
+                properties: VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT.rawValue)
+            )
+            guard vkAllocateMemory(device, &upAlloc, nil, &uploadMemory) == VK_SUCCESS else {
+                throw VulkanEngineError.memory
+            }
+            vkBindImageMemory(device, created, uploadMemory, 0)
+        }
 
         var view: VkImageView?
         var viewInfo = VkImageViewCreateInfo()
@@ -1520,11 +1623,14 @@ extension VulkanRenderEngine {
         }
 
         return PixelBufferShaderNode(
-            width:          UInt32(width),
-            height:         UInt32(height),
+            sourceWidth:    UInt32(width),
+            sourceHeight:   UInt32(height),
+            scale:          UInt32(scale),
             image:          image,
             imageView:      view,
             memory:         memory,
+            uploadImage:    uploadImage,
+            uploadMemory:   uploadMemory,
             stagingBuffer:  stagingBuffer,
             stagingMemory:  stagingMemory,
             stagingPointer: mapped,

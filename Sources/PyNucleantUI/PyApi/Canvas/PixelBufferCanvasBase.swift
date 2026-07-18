@@ -27,10 +27,16 @@ public final class PixelBufferCanvasBase: PyCanvasBase {
 
     public var id: Int = UUID().hashValue
 
-    /// Fixed content resolution, set at `__init__` — the size of the
-    /// VkImage the producer fills, not the widget's on-screen size.
+    /// Fixed content resolution, set at `__init__` — the size the
+    /// producer writes, not the widget's on-screen size.
     public let contentWidth:  Int
     public let contentHeight: Int
+
+    /// Integer up-scale of the node's image over the content size. The
+    /// producer still writes contentWidth×contentHeight; the upload path
+    /// nearest-blits up on the GPU, so a post shader sees a scale×-larger
+    /// surface with real subpixels. 1 = the plain old direct-copy path.
+    public let contentScale: Int
 
     public private(set) var node: PixelBufferShaderNode?
     public private(set) weak var engine: VulkanRenderEngine?
@@ -72,10 +78,11 @@ public final class PixelBufferCanvasBase: PyCanvasBase {
     let _update_canvas: PyPointer?
 
     @PyInit
-    init(__self__: PyPointer, width: Int, height: Int) {
+    init(__self__: PyPointer, width: Int, height: Int, scale: Int) {
         self.__self__ = __self__
         self.contentWidth  = width
         self.contentHeight = height
+        self.contentScale  = max(scale, 1)
         func optionalAttr(_ key: String) -> PyPointer? {
             PyObject_HasAttr(__self__, key) ? try? PyObject_GetAttr(__self__, key: key) : nil
         }
@@ -111,7 +118,8 @@ public final class PixelBufferCanvasBase: PyCanvasBase {
         if node == nil {
             guard let built = try? engine.makePixelBufferNode(
                 width:  contentWidth,
-                height: contentHeight
+                height: contentHeight,
+                scale:  contentScale
             ) else {
                 print("PixelBufferCanvasBase: render node creation failed")
                 return
