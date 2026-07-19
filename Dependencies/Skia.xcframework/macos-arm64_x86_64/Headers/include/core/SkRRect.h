@@ -13,9 +13,11 @@
 #include "include/core/SkScalar.h"
 #include "include/core/SkSpan.h"
 #include "include/core/SkTypes.h"
+#include "include/private/base/SkMacros.h"
 
 #include <cstdint>
 #include <cstring>
+#include <optional>
 
 class SkMatrix;
 class SkString;
@@ -33,6 +35,7 @@ class SkString;
     If either axis radii is zero or less: radii are stored as zero; corner is square.
     If corner curves overlap, radii are proportionally reduced to fit within bounds.
 */
+SK_BEGIN_REQUIRE_DENSE
 class SK_API SkRRect {
 public:
 
@@ -153,7 +156,7 @@ public:
         return rr;
     }
 
-    /** Sets bounds to oval, x-axis radii to half oval.width(), and all y-axis radii
+    /** Initializes to oval, x-axis radii to half oval.width(), and all y-axis radii
         to half oval.height(). If oval bounds is empty, sets to kEmpty_Type.
         Otherwise, sets to kOval_Type.
 
@@ -166,7 +169,7 @@ public:
         return rr;
     }
 
-    /** Sets to rounded rectangle with the same radii for all four corners.
+    /** Initializes to rounded rectangle with the same radii for all four corners.
         If rect is empty, sets to kEmpty_Type.
         Otherwise, if xRad and yRad are zero, sets to kRect_Type.
         Otherwise, if xRad is at least half rect.width() and yRad is at least half
@@ -181,6 +184,27 @@ public:
     static SkRRect MakeRectXY(const SkRect& rect, SkScalar xRad, SkScalar yRad) {
         SkRRect rr;
         rr.setRectXY(rect, xRad, yRad);
+        return rr;
+    }
+
+    /** Initializes to rounded rectangle with a radii array for individual control
+        of all four corners.
+
+        If rect is empty, sets to kEmpty_Type.
+        Otherwise, if one of each corner radii are zero, sets to kRect_Type.
+        Otherwise, if all x-axis radii are equal and at least half rect.width(), and
+        all y-axis radii are equal at least half rect.height(), sets to kOval_Type.
+        Otherwise, if all x-axis radii are equal, and all y-axis radii are equal,
+        sets to kSimple_Type. Otherwise, sets to kNinePatch_Type.
+
+        @param rect   bounds of rounded rectangle
+        @param radii  corner x-axis and y-axis radii
+
+        example: https://fiddle.skia.org/c/@RRect_setRectRadii
+    */
+    static SkRRect MakeRectRadii(const SkRect& rect, const SkVector radii[4]) {
+        SkRRect rr;
+        rr.setRectRadii(rect, radii);
         return rr;
     }
 
@@ -230,7 +254,7 @@ public:
     void setNinePatch(const SkRect& rect, SkScalar leftRad, SkScalar topRad,
                       SkScalar rightRad, SkScalar bottomRad);
 
-    /** Sets bounds to rect. Sets radii array for individual control of all for corners.
+    /** Sets bounds to rect. Sets radii array for individual control of all four corners.
 
         If rect is empty, sets to kEmpty_Type.
         Otherwise, if one of each corner radii are zero, sets to kRect_Type.
@@ -448,18 +472,13 @@ public:
     */
     size_t readFromMemory(const void* buffer, size_t length);
 
-    /** Transforms by SkRRect by matrix, storing result in dst.
-        Returns true if SkRRect transformed can be represented by another SkRRect.
-        Returns false if matrix contains transformations that are not axis aligned.
+    /** Transforms by SkRRect by matrix and return it if possible.
+     *  If the matrix does not preserve axis-alignment (e.g. rotates, skews, etc.)
+     *  then this returns {}.
+     */
+    std::optional<SkRRect> transform(const SkMatrix&) const;
 
-        Asserts in debug builds if SkRRect equals dst.
-
-        @param matrix  SkMatrix specifying the transform
-        @param dst     SkRRect to store the result
-        @return        true if transformation succeeded.
-
-        example: https://fiddle.skia.org/c/@RRect_transform
-    */
+    // Deprecated: use optional form
     bool transform(const SkMatrix& matrix, SkRRect* dst) const;
 
     /** Writes text representation of SkRRect to standard output.
@@ -511,11 +530,11 @@ private:
     SkVector fRadii[4] = {{0, 0}, {0, 0}, {0,0}, {0,0}};
     // use an explicitly sized type so we're sure the class is dense (no uninitialized bytes)
     int32_t fType = kEmpty_Type;
-    // TODO: add padding so we can use memcpy for flattening and not copy uninitialized data
 
     // to access fRadii directly
     friend class SkPath;
     friend class SkRRectPriv;
 };
+SK_END_REQUIRE_DENSE
 
 #endif

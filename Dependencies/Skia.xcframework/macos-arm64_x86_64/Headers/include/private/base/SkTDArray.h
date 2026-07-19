@@ -13,9 +13,9 @@
 #include "include/private/base/SkDebug.h"
 #include "include/private/base/SkTo.h"
 
-#include <algorithm>
 #include <cstddef>
 #include <initializer_list>
+#include <utility>
 
 class SK_SPI SkTDStorage {
 public:
@@ -176,10 +176,10 @@ public:
         fStorage.clear();
     }
 
-     // Sets the number of elements in the array.
-     // If the array does not have space for count elements, it will increase
-     // the storage allocated to some amount greater than that required.
-     // It will never shrink the storage.
+    // Sets the number of elements in the array.
+    // If the array does not have space for count elements, it will increase
+    // the storage allocated to some amount greater than that required.
+    // It will never shrink the storage.
     void resize(int count) {
         fStorage.resize(count);
     }

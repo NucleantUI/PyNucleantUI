@@ -81,7 +81,7 @@ public:
     /**
      * Creates a TArray by copying contents from an SkSpan. The new array will be heap allocated.
      */
-    TArray(SkSpan<const T> data) : TArray(data.begin(), static_cast<int>(data.size())) {}
+    TArray(SkSpan<const T> data) : TArray(data.data(), static_cast<int>(data.size())) {}
 
     /**
      * Creates a TArray by copying contents of an initializer list.
@@ -154,12 +154,11 @@ public:
     /**
      * Resets to a copy of a C array and resets any reserve count.
      */
-    void reset(const T* array, int count) {
-        SkASSERT(count >= 0);
+    void reset(SkSpan<const T> src) {
         this->clear();
-        this->checkRealloc(count, kExactFit);
-        this->changeSize(count);
-        this->copy(array);
+        this->checkRealloc(src.size(), kExactFit);
+        this->changeSize(src.size());
+        this->copy(src.data());
     }
 
     /**
@@ -530,7 +529,7 @@ protected:
         if (size > InitialCapacity) {
             this->initData(size);
         } else {
-            this->setDataFromBytes(*storage);
+            this->setDataFromBytes({storage->data(), storage->size()});
             this->changeSize(size);
 
             // setDataFromBytes always sets fOwnMemory to true, but we are actually using static
@@ -549,7 +548,7 @@ protected:
     template <int InitialCapacity>
     TArray(SkSpan<const T> data, SkAlignedSTStorage<InitialCapacity, T>* storage)
             : TArray{storage, static_cast<int>(data.size())} {
-        this->copy(data.begin());
+        this->copy(data.data());
     }
 
 private:
@@ -617,7 +616,7 @@ private:
     // unpredictable location in memory. Of course, TArray won't actually use fItemArray in this
     // way, and we don't want to construct a T before the user requests one. There's no real risk
     // here, so disable CFI when doing these casts.
-    SK_CLANG_NO_SANITIZE("cfi")
+    SK_NO_SANITIZE_CFI
     static T* TCast(void* buffer) {
         return (T*)buffer;
     }

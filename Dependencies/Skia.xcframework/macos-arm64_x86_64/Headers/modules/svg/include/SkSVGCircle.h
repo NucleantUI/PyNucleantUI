@@ -9,6 +9,7 @@
 #define SkSVGCircle_DEFINED
 
 #include "include/core/SkPath.h"
+#include "include/core/SkPathTypes.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkScalar.h"
@@ -23,7 +24,6 @@ class SkCanvas;
 class SkPaint;
 class SkSVGLengthContext;
 class SkSVGRenderContext;
-enum class SkPathFillType;
 struct SkPoint;
 
 class SK_API SkSVGCircle final : public SkSVGShape {
@@ -42,7 +42,7 @@ protected:
 
     SkPath onAsPath(const SkSVGRenderContext&) const override;
 
-    SkRect onObjectBoundingBox(const SkSVGRenderContext&) const override;
+    SkRect onTransformableObjectBoundingBox(const SkSVGRenderContext&) const override;
 
 private:
     SkSVGCircle();
