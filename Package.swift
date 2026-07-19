@@ -48,13 +48,7 @@ let package = Package(
             dependencies: [
                 "Skia"
             ],
-            exclude: [
-                "skia-headers"
-            ],
             cxxSettings: [
-                // Symlink -> ../../Dependencies/Skia.xcframework/macos-arm64/Headers;
-                // SPM doesn't hand a binaryTarget's Headers dir to C++ compiles.
-                .headerSearchPath("skia-headers"),
                 .define("SK_GANESH"),
                 .define("SK_VULKAN"),
                 .define("SK_USE_INTERNAL_VULKAN_HEADERS")

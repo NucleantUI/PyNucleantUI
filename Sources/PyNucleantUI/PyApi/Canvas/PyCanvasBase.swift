@@ -19,9 +19,8 @@ import Foundation
 /// (`PySulphurSceneBase`); the widget never knows which. Each
 /// implementation decides what `attach` means: build/adopt a render node,
 /// or hook a scene into the nearest canvas up the tree.
-public protocol PyCanvasBase: PySerializable, PyClassProtocol, AnyObject {
+public protocol PyCanvasBase: CanvasBase, PySerializable, PyClassProtocol, AnyObject {
 
-    var id: Int { get }
     /// The widget holding this canvas. Canvases record their owner and
     /// widgets their parent — that chain is how nested scene canvases find
     /// the canvas they composite through.
@@ -40,27 +39,21 @@ public protocol PyCanvasBase: PySerializable, PyClassProtocol, AnyObject {
     /// context is theirs to ignore.
     func attach(
         engine:  VulkanRenderEngine,
-        wgpu:    WgpuContext,
-        ownNode: ThorShaderNode?,
+       wgpu:    WgpuContext,
+        ownNode: VulkanRenderNode?,
         width:   Int,
         height:  Int
     )
-
-    /// Undo `attach`: node canvases leave the composite list, scene
-    /// canvases take their paint back off the host.
-    func detach()
-
-    /// Per-frame tick from the owning widget: flag for redraw and drive
-    /// this canvas's own Python `update_canvas` hook if it has one.
-    func on_render(dt: Double)
-
-    /// Flag for redraw this frame.
-    func markDirty()
-
-    /// Add / remove 2D content. Canvas-level add on node canvases,
-    /// scene-level add on scene canvases — this is what lets scenes nest
-    /// through whichever canvas kind they land on.
-    func add(paint: Tvg_Paint)
-    func remove(paint: Tvg_Paint)
 }
 
+extension PyCanvasBase {
+    public func attach(
+        engine:  VulkanRenderEngine,
+        wgpu:    WgpuContext,
+        ownNode: VulkanRenderNode?,
+        width:   Int,
+        height:  Int
+    ) {
+        attach(engine: engine, wgpu: wgpu, ownNode: ownNode as? Node, width: width, height: height)
+    }
+}

@@ -62,7 +62,7 @@ public final class NucleantWidgetBase: PyWidgetProtocol, PySerializable, @precon
         }
     }
 
-    var _canvas: (any PyCanvasBase)?
+    var _canvas: PyCanvasBase?//(any PyCanvasBase)?
 
     /// Owned reference to `_canvas`'s Python shell. The Swift canvas
     /// instance is owned by its Python object (tp_init stores it, dealloc
@@ -127,7 +127,7 @@ public final class NucleantWidgetBase: PyWidgetProtocol, PySerializable, @precon
     /// Single point of canvas replacement: detaches whatever was there,
     /// wires the owner back-pointer, and hands the widget's (or nearest
     /// ancestor's) frame down so the canvas sizes itself from it.
-    private func setCanvas(_ newCanvas: (any PyCanvasBase)?) {
+    private func setCanvas(_ newCanvas: PyCanvasBase?) {
         if let old = _canvas, old !== newCanvas {
             old.detach()
         }

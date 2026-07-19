@@ -103,11 +103,13 @@ public final class PixelBufferCanvasBase: PyCanvasBase {
 
     public var width:  Int { contentWidth }
     public var height: Int { contentHeight }
+    
+
 
     public func attach(
         engine:  VulkanRenderEngine,
         wgpu:    WgpuContext,
-        ownNode: ThorShaderNode?,
+        ownNode: PixelBufferShaderNode?,
         width:   Int,
         height:  Int
     ) {

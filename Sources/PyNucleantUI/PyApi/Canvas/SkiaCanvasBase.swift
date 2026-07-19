@@ -172,7 +172,7 @@ public final class SkiaCanvasBase: PyCanvasBase, SkiaGPUCanvas, PyCapsuleProtoco
     public func attach(
         engine:  VulkanRenderEngine,
         wgpu:    WgpuContext,
-        ownNode: ThorShaderNode?,
+        ownNode: SkiaShaderNode?,
         width:   Int,
         height:  Int
     ) {

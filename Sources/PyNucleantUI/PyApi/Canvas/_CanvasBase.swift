@@ -7,7 +7,7 @@ import PySerializing
 
 
 
-public enum _CanvasBase {
+public enum __CanvasBase {
     case thorCanvas(ThorCanvasBase)
     case thorScene(ThorSceneBase)
     case skiaSurface(SkiaCanvasBase)
@@ -15,7 +15,7 @@ public enum _CanvasBase {
     case ogl(PixelBufferCanvasBase)
 }
 
-extension _CanvasBase {
+extension __CanvasBase {
     public func setFrame(_ frame: NucleantFrame?) {
         switch self {
         case .thorCanvas(let thorCanvasBase):
@@ -98,7 +98,7 @@ extension _CanvasBase {
     }
 }
 
-extension _CanvasBase: PySerializable {
+extension __CanvasBase: PySerializable {
     public func pyPointer() -> PyPointer {
         switch self {
         case .thorCanvas(let thorCanvasBase):
@@ -114,7 +114,7 @@ extension _CanvasBase: PySerializable {
         }
     }
     
-    public static func casted(unsafe object: PyPointer) throws -> _CanvasBase {
+    public static func casted(unsafe object: PyPointer) throws -> __CanvasBase {
         switch object {
         case ThorCanvasBase.PyType:
             return .thorCanvas(try .casted(unsafe: object))
@@ -130,7 +130,7 @@ extension _CanvasBase: PySerializable {
         }
     }
     
-    public static func casted(from object: PyPointer) throws -> _CanvasBase {
+    public static func casted(from object: PyPointer) throws -> __CanvasBase {
         try casted(unsafe: object)
     }
 }

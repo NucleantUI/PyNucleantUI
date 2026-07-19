@@ -20,13 +20,14 @@ import Foundation
 /// Widgets never touch the render node — everything GPU-facing goes
 /// through this object.
 @PyClass(self_ref: true)
-public final class ThorCanvasBase: PyCanvasBase, ThorGPUCanvas, PyCapsuleProtocol {
+public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, PyCapsuleProtocol {
     
     public var id: Int = UUID().hashValue
 
     public var base: Tvg_Canvas
-
-    public private(set) var node: ThorShaderNode?
+    
+    public typealias Node = ThorShaderNode
+    public private(set) var node: Node?
     private var thorTexture: WGPUTexture?
 
     public private(set) weak var engine: VulkanRenderEngine?
@@ -177,6 +178,16 @@ public final class ThorCanvasBase: PyCanvasBase, ThorGPUCanvas, PyCapsuleProtoco
 
     public var width:  Int { node.map { Int($0.width)  } ?? 0 }
     public var height: Int { node.map { Int($0.height) } ?? 0 }
+    
+    public func attach(
+        engine:  VulkanRenderEngine,
+        wgpu:    WgpuContext,
+        ownNode: VulkanRenderNode?,
+        width:   Int,
+        height:  Int
+    ) {
+        attach(engine: engine, wgpu: wgpu, ownNode: ownNode as? ThorShaderNode, width: width, height: height)
+    }
 
     public func attach(
         engine:  VulkanRenderEngine,

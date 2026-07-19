@@ -22,7 +22,7 @@ import Foundation
 /// adds its paint there; nested scene widgets compose through each other
 /// for free.
 @PyClass(self_ref: true)
-public final class ThorSceneBase: PyCanvasBase {
+public final class ThorSceneBase: PyCanvasBase, ThorHostCanvas {
     
     public var id: Int = UUID().hashValue
 
@@ -38,7 +38,7 @@ public final class ThorSceneBase: PyCanvasBase {
 
     /// The canvas this scene's paint currently lives on. Weak: the host
     /// belongs to its own widget, this is only the record for detach.
-    weak var hostCanvas: (any PyCanvasBase)?
+    weak var hostCanvas: (any ThorHostCanvas)?
 
     private var __self__: PyPointer
 
@@ -82,6 +82,16 @@ public final class ThorSceneBase: PyCanvasBase {
     ) {
         attachToHost()
     }
+    
+    public func attach(
+        engine:  VulkanRenderEngine,
+        wgpu:    WgpuContext,
+        ownNode: VulkanRenderNode?,
+        width:   Int,
+        height:  Int
+    ) {
+        attachToHost()
+    }
 
     /// Bind the paint to the nearest canvas above the owner widget. Starts
     /// at the owner's parent — the owner's own canvas is this scene. No-op
@@ -91,7 +101,7 @@ public final class ThorSceneBase: PyCanvasBase {
         guard
             hostCanvas == nil,
             let paint,
-            let host = owner?.parent?.nearestCanvas()
+            let host = owner?.parent?.nearestCanvas() as? ThorHostCanvas
         else { return }
         host.add(paint: paint)
         hostCanvas = host
