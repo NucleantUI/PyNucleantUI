@@ -106,6 +106,21 @@ public final class PixelBufferCanvasBase: PyCanvasBase {
     
 
 
+    /// Explicit witness for the `VulkanRenderNode?`-erased requirement:
+    /// without this, `PyCanvasBase`'s generic default (`ownNode as? Node`)
+    /// resolves back to itself instead of this concrete overload —
+    /// infinite recursion, stack overflow, no error printed. `ThorCanvasBase`
+    /// carries the same override for the same reason.
+    public func attach(
+        engine:  VulkanRenderEngine,
+        wgpu:    WgpuContext,
+        ownNode: VulkanRenderNode?,
+        width:   Int,
+        height:  Int
+    ) {
+        attach(engine: engine, wgpu: wgpu, ownNode: ownNode as? PixelBufferShaderNode, width: width, height: height)
+    }
+
     public func attach(
         engine:  VulkanRenderEngine,
         wgpu:    WgpuContext,
