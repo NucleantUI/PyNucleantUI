@@ -62,7 +62,8 @@ cskia_surface_t* cskia_surface_wrap_vk_image(
     int32_t          height,
     uint32_t         vk_format,
     uint32_t         vk_image_layout,
-    uint32_t         vk_usage_flags);
+    uint32_t         vk_usage_flags,
+    uint32_t         vk_queue_family_index);
 
 /// Release the SkSurface and force the context to finish + free its GPU
 /// work for it. Call before destroying the wrapped VkImage.

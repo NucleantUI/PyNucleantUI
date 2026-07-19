@@ -126,6 +126,11 @@ cskia_context_t* cskia_context_create(
         delete ctx;
         return nullptr;
     }
+    fprintf(stderr, "cskia: context created — colorTypeSupportedAsSurface(RGBA_8888)=%d "
+                    "maxSurfaceSampleCount(RGBA_8888)=%d defaultBackendFormat(RGBA_8888,renderable).isValid=%d\n",
+            ctx->gr->colorTypeSupportedAsSurface(kRGBA_8888_SkColorType),
+            ctx->gr->maxSurfaceSampleCountForColorType(kRGBA_8888_SkColorType),
+            ctx->gr->defaultBackendFormat(kRGBA_8888_SkColorType, GrRenderable::kYes).isValid());
     return ctx;
 }
 
@@ -147,7 +152,8 @@ cskia_surface_t* cskia_surface_wrap_vk_image(
     int32_t          height,
     uint32_t         vk_format,
     uint32_t         vk_image_layout,
-    uint32_t         vk_usage_flags)
+    uint32_t         vk_usage_flags,
+    uint32_t         vk_queue_family_index)
 {
     if (!ctx || !ctx->gr || !vk_image || width <= 0 || height <= 0) {
         return nullptr;
@@ -161,18 +167,36 @@ cskia_surface_t* cskia_surface_wrap_vk_image(
     info.fImageUsageFlags    = vk_usage_flags;
     info.fSampleCount        = 1;
     info.fLevelCount         = 1;
-    info.fCurrentQueueFamily = VK_QUEUE_FAMILY_IGNORED;
+    // VK_QUEUE_FAMILY_IGNORED is only valid alongside VK_SHARING_MODE_CONCURRENT —
+    // for EXCLUSIVE (what the engine creates this image with), Ganesh needs the
+    // real owning queue family to reason about ownership-transfer barriers, and
+    // silently rejects the wrap otherwise.
+    info.fCurrentQueueFamily = vk_queue_family_index;
     info.fSharingMode        = VK_SHARING_MODE_EXCLUSIVE;
 
     SkColorType colorType;
     switch (info.fFormat) {
         case VK_FORMAT_R8G8B8A8_UNORM: colorType = kRGBA_8888_SkColorType; break;
         case VK_FORMAT_B8G8R8A8_UNORM: colorType = kBGRA_8888_SkColorType; break;
-        default: return nullptr;
+        default:
+            fprintf(stderr, "cskia: wrap_vk_image: unsupported VkFormat %d\n", (int)info.fFormat);
+            return nullptr;
     }
 
     auto* wrapper = new cskia_surface_t();
     wrapper->renderTarget = GrBackendRenderTargets::MakeVk(width, height, info);
+
+    GrBackendFormat rtFormat = wrapper->renderTarget.getBackendFormat();
+    VkFormat extractedFormat = VK_FORMAT_UNDEFINED;
+    bool gotFormat = GrBackendFormats::AsVkFormat(rtFormat, &extractedFormat);
+    fprintf(stderr, "cskia: wrap_vk_image: rt.sampleCnt=%d rtFormat.isValid=%d "
+                    "AsVkFormat.ok=%d extractedFormat=%d (expected %d)\n",
+            wrapper->renderTarget.sampleCnt(), rtFormat.isValid(), gotFormat,
+            (int)extractedFormat, (int)info.fFormat);
+
+    fprintf(stderr, "cskia: wrap_vk_image: gr=%p renderTarget.isValid=%d width=%d height=%d usage=0x%x layout=%d\n",
+            (void*)ctx->gr.get(), wrapper->renderTarget.isValid(), width, height,
+            (unsigned)vk_usage_flags, (int)vk_image_layout);
 
     SkSurfaceProps props;
     wrapper->surface = SkSurfaces::WrapBackendRenderTarget(
@@ -183,6 +207,7 @@ cskia_surface_t* cskia_surface_wrap_vk_image(
         nullptr,
         &props);
     if (!wrapper->surface) {
+        fprintf(stderr, "cskia: wrap_vk_image: SkSurfaces::WrapBackendRenderTarget returned null\n");
         delete wrapper;
         return nullptr;
     }

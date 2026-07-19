@@ -26,14 +26,18 @@ public final class SkiaSurface {
     /// Wrap `vkImage` (borrowed, never owned). `format`, `layout` and
     /// `usageFlags` are the raw Vulkan enum/flag values of the image as
     /// it exists right now — they must match its creation exactly.
+    /// `queueFamilyIndex` must be the queue family that owns the image
+    /// (VK_SHARING_MODE_EXCLUSIVE only; Ganesh rejects VK_QUEUE_FAMILY_IGNORED
+    /// there since that value is only meaningful under CONCURRENT sharing).
     public init(
-        context:    SkiaVulkanContext,
-        vkImage:    OpaquePointer,
-        width:      Int,
-        height:     Int,
-        format:     UInt32,
-        layout:     UInt32,
-        usageFlags: UInt32
+        context:          SkiaVulkanContext,
+        vkImage:          OpaquePointer,
+        width:            Int,
+        height:           Int,
+        format:           UInt32,
+        layout:           UInt32,
+        usageFlags:       UInt32,
+        queueFamilyIndex: UInt32
     ) throws {
         guard let created = cskia_surface_wrap_vk_image(
             context.base,
@@ -42,7 +46,8 @@ public final class SkiaSurface {
             Int32(height),
             format,
             layout,
-            usageFlags
+            usageFlags,
+            queueFamilyIndex
         ) else {
             throw SkiaCoreError.surfaceCreationFailed
         }

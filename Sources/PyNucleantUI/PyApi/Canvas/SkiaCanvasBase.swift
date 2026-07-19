@@ -191,6 +191,7 @@ public final class SkiaCanvasBase: PyCanvasBase, SkiaGPUCanvas, PyCapsuleProtoco
         width:   Int,
         height:  Int
     ) {
+        print("SkiaCanvasBase.attach: entered, width=\(width) height=\(height) ownNode=\(String(describing: ownNode))")
         self.engine = engine
         // wgpu and the root's thor node are deliberately ignored — a Skia
         // canvas renders on the engine's own device/queue, nothing wgpu.
@@ -224,6 +225,7 @@ public final class SkiaCanvasBase: PyCanvasBase, SkiaGPUCanvas, PyCapsuleProtoco
             }
             node = built
             engine.append(.init(id: id, context: .skia(built)))
+            print("SkiaCanvasBase.attach: node created \(width)x\(height), surface=\(String(describing: built.canvas.surface))")
         } else if let frame = _frame {
             // Already-built node re-attaching under a frame that changed
             // while detached — same path as a live frame change.

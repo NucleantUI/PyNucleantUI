@@ -65,10 +65,15 @@ extension VulkanRenderEngine {
         width:   Int,
         height:  Int
     ) -> SkiaShaderNode? {
+        // GrVkGpu::onWrapBackendRenderTarget (check_image_info) unconditionally
+        // requires BOTH transfer bits on any VkImage Ganesh wraps — without
+        // TRANSFER_SRC_BIT it silently rejects the wrap (WrapBackendRenderTarget
+        // returns null, no error surfaced anywhere in the public API).
         let usage = VkImageUsageFlags(
             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT.rawValue |
             VK_IMAGE_USAGE_SAMPLED_BIT.rawValue |
             VK_IMAGE_USAGE_STORAGE_BIT.rawValue |
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT.rawValue |
             VK_IMAGE_USAGE_TRANSFER_DST_BIT.rawValue
         )
 
@@ -141,13 +146,14 @@ extension VulkanRenderEngine {
         }
 
         guard let surface = try? SkiaSurface(
-            context:    context,
-            vkImage:    image,
-            width:      width,
-            height:     height,
-            format:     VK_FORMAT_R8G8B8A8_UNORM.rawValue,
-            layout:     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL.rawValue,
-            usageFlags: usage
+            context:          context,
+            vkImage:          image,
+            width:            width,
+            height:           height,
+            format:           VK_FORMAT_R8G8B8A8_UNORM.rawValue,
+            layout:           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL.rawValue,
+            usageFlags:       usage,
+            queueFamilyIndex: queueFamilyIndex
         ) else {
             vkDestroyImageView(device, view, nil)
             vkDestroyImage(device, image, nil)
