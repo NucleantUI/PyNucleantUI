@@ -31,6 +31,7 @@ extension PyNucleantUI_Package {
                 NucleantWidgetBase.self,
                 ThorCanvasBase.self,
                 ThorSceneBase.self,
+                SkiaCanvasBase.self,
                 CanvasShader.self
             ]
             

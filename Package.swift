@@ -34,11 +34,58 @@ let package = Package(
             name: "CWgpu",
             path: "Sources/CWgpu"
         ),
+        // Skia static lib + public header tree, produced by
+        // /Volumes/CodeSSD/dev_projects/sulphur_dev/skia-build/build_skia_macos.py
+        // (Ganesh Vulkan backend only — no Metal/GL).
+        .binaryTarget(
+            name: "Skia",
+            path: "Dependencies/Skia.xcframework"
+        ),
+        // Plain-C shim over Skia's C++ API: Vulkan GrDirectContext,
+        // VkImage-wrapping SkSurface, flush, basic draw + text.
+        .target(
+            name: "CSkia",
+            dependencies: [
+                "Skia"
+            ],
+            exclude: [
+                "skia-headers"
+            ],
+            cxxSettings: [
+                // Symlink -> ../../Dependencies/Skia.xcframework/macos-arm64/Headers;
+                // SPM doesn't hand a binaryTarget's Headers dir to C++ compiles.
+                .headerSearchPath("skia-headers"),
+                .define("SK_GANESH"),
+                .define("SK_VULKAN"),
+                .define("SK_USE_INTERNAL_VULKAN_HEADERS")
+            ],
+            linkerSettings: [
+                .linkedLibrary("c++"),
+                .linkedFramework("CoreFoundation"),
+                .linkedFramework("CoreGraphics"),
+                .linkedFramework("CoreText"),
+                .linkedFramework("ImageIO")
+            ]
+        ),
+        // Swift wrappers over CSkia — what SkiaCanvasBase builds on.
+        .target(
+            name: "SkiaCore",
+            dependencies: [
+                "CSkia"
+            ],
+            exclude: [
+                "implement-skia-surface.md"
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ]
+        ),
         .target(
             name: "PyNucleantUI",
             dependencies: [
                 "CWgpu",
                 "KvLangBuilder",
+                "SkiaCore",
                 .product(name: "SulphurCore", package: "SulphurCore"),
                 .product(name: "SulphurApplication", package: "SulphurCore"),
                 .product(name: "SulphurUI", package: "SulphurUI"),
@@ -76,5 +123,6 @@ let package = Package(
             name: "PyNucleantUITests",
             dependencies: ["PyNucleantUI"]
         ),
-    ]
+    ],
+    cxxLanguageStandard: .cxx17
 )

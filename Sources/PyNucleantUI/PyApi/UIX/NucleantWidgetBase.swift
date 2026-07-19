@@ -93,6 +93,7 @@ public final class NucleantWidgetBase: PyWidgetProtocol, PySerializable, @precon
             case ThorCanvasBase.PyType: try? ThorCanvasBase.casted(unsafe: newValue)
             case ThorSceneBase.PyType: try? ThorSceneBase.casted(unsafe: newValue)
             case PixelBufferCanvasBase.PyType: try? PixelBufferCanvasBase.casted(unsafe: newValue)
+            case SkiaCanvasBase.PyType: try? SkiaCanvasBase.casted(unsafe: newValue)
             default: nil
             }
             setCanvas(assigned)

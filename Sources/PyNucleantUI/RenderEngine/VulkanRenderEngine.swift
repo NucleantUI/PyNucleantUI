@@ -200,13 +200,16 @@ public final class VulkanRenderEngine: VulkanContext {
     private var nodeSets: [Int: VkDescriptorSet] = [:]
     private var nodeDescriptorPools: [Int: VkDescriptorPool] = [:]
     /// Nodes whose image currently sits in SHADER_READ_ONLY_OPTIMAL.
-    private var readable: Set<Int> = []
+    /// Internal (not private): the Skia update lives in its own file
+    /// (VulkanRenderEngine+Skia.swift) and publishes through this too.
+    var readable: Set<Int> = []
     /// Nodes we've already logged a draw failure for — ThorVG's Canvas
     /// legitimately (and permanently) returns InsufficientCondition from a
     /// canvas nothing was ever painted into (e.g. a container widget whose
     /// on_canvas only holds children), so this is expected steady-state for
     /// some nodes, not a transient error worth repeating every frame.
-    private var warnedFailedNodes: Set<Int> = []
+    /// Internal for the same reason as `readable`.
+    var warnedFailedNodes: Set<Int> = []
 
     // MARK: - Init
 

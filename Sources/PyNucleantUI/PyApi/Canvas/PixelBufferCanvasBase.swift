@@ -168,6 +168,22 @@ public final class PixelBufferCanvasBase: PyCanvasBase {
         node?.dirty = true
     }
 
+    /// Python-facing pixel feed: hand a full frame of tightly-packed RGBA8
+    /// bytes to the node. `buffer` accepts anything satisfying Python's
+    /// buffer protocol — `bytes`, `bytearray`, or `memoryview` over any
+    /// other buffer-protocol object (numpy, ctypes, array.array, …) — since
+    /// `Data` deserializes from all three (see `PyDeserialize+Data.swift`).
+    /// This is the generic counterpart to the Swift-side `onFrame` hook
+    /// (e.g. `NesEmulator.connect`): any Python producer can call this
+    /// directly without a dedicated Swift bridge of its own.
+    @PyMethod
+    func write(buffer: Data) {
+        guard let node else { return }
+        buffer.withUnsafeBytes { raw in
+            node.write(pixels: raw)
+        }
+    }
+
     /// A pixel canvas carries no vector layer — paints have nowhere to
     /// land. Part of the `PyCanvasBase` contract, so scene canvases that
     /// resolve their host up the tree fail loudly instead of silently.

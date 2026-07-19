@@ -15,6 +15,7 @@ extension PyNucleantUI_Package {
             ThorCanvasBase.self,
             ThorSceneBase.self,
             PixelBufferCanvasBase.self,
+            SkiaCanvasBase.self,
             CanvasShader.self
         ]
         
