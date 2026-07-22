@@ -26,7 +26,8 @@ let package = Package(
         //.package(path: "/Volumes/CodeSSD/dev_projects/sulphur_dev/SulphurShader"),
         .package(path: "/Volumes/CodeSSD/dev_projects/pyswiftkit/PySwiftKit"),
         .package(url: "https://github.com/Py-Swift/SwiftyKvLang", branch: "master"),
-        .package(url: "https://github.com/Py-Swift/PySwiftAST.git", branch: "master")
+        .package(url: "https://github.com/Py-Swift/PySwiftAST.git", branch: "master"),
+        .package(path: "/Volumes/CodeSSD/dev_projects/pyswiftkit/PyFileGenerator")
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.

@@ -36,7 +36,7 @@ public protocol ThorHostCanvas: PySerializable, PyClassProtocol, AnyObject {
     func attach(
         //engine:  VulkanRenderEngine,
         //wgpu:    WgpuContext,
-        ownNode: ThorShaderNode?,
+        ownNode: ThorShaderNode<RenderNode>?,
         width:   Int,
         height:  Int
     )

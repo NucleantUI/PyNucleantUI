@@ -1,6 +1,15 @@
 {
-  "originHash" : "82096b6385a0349cc3289bbd767e0b1f64fde647bca8d8827a7fff0bef1f2118",
+  "originHash" : "6d68a371ecc062ced90e048f80c0db2346e0032524e07d754c86a79a6043627c",
   "pins" : [
+    {
+      "identity" : "pathkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/kylef/PathKit",
+      "state" : {
+        "revision" : "3bfd2737b700b9a36565a8c94f4ad2b050a5e574",
+        "version" : "1.0.1"
+      }
+    },
     {
       "identity" : "pyswiftast",
       "kind" : "remoteSourceControl",
@@ -8,6 +17,24 @@
       "state" : {
         "branch" : "master",
         "revision" : "c757b0d9e7975b59d3c670fea8a99b043e2cb4ba"
+      }
+    },
+    {
+      "identity" : "spectre",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/kylef/Spectre.git",
+      "state" : {
+        "revision" : "26cc5e9ae0947092c7139ef7ba612e34646086c7",
+        "version" : "0.10.1"
+      }
+    },
+    {
+      "identity" : "swift-argument-parser",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-argument-parser",
+      "state" : {
+        "revision" : "6a52f3251125d74daf04fcbd5e6f08a75d074382",
+        "version" : "1.8.2"
       }
     },
     {

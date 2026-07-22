@@ -28,7 +28,7 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
 
     public var base: Tvg_Canvas
     
-    public typealias Node = ThorShaderNode
+    public typealias Node = ThorShaderNode<RenderNode>
     public private(set) var node: Node?
     //private var thorTexture: WGPUTexture?
     
@@ -183,15 +183,16 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
     public var height: Int { node.map { Int($0.height) } ?? 0 }
     
 
+    /// Bind into the render pipeline. The canvas is a passive holder now:
+    /// the render node is built by the engine-owning layer (the window) and
+    /// handed down as `ownNode` — building it here was the engine's job in
+    /// the old design and is deliberately gone (see rules: the canvas must
+    /// not reach for the engine or webgpu to make a node).
     public func attach(
-        engine:  RenderEngine,
-        //wgpu:    WgpuContext,
-        ownNode: ThorShaderNode?,
+        ownNode: ThorShaderNode<RenderNode>?,
         width:   Int,
         height:  Int
     ) {
-        self.engine = engine
-        //self.wgpu = wgpu
         // Re-resolve the owner's frame here — `owner` is usually set before
         // the widget is parented, so the pull at owner-set time couldn't
         // see frames inherited down the tree yet. Direct `_frame` write on
@@ -202,50 +203,32 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
             observeFrame()
         }
         if let ownNode {
+            // Adopt the node the window handed down: take over its ThorVG
+            // canvas so capsules Python took after __init__ stay valid.
             base = ownNode.canvas.base
             node = ownNode
         } else if node == nil {
-            // The frame wins over the tree-attach size; without one the
-            // canvas keeps adapting to the nearest parent size.
-            let width  = _frame.map { Int($0.size.x) } ?? width
-            let height = _frame.map { Int($0.size.y) } ?? height
-            // The node adopts this canvas's own `base` — created at @PyInit —
-            // so capsules Python took right after __init__ stay valid.
-            
-            // not the freaking engine job to make widgetNode
-            // engine dont know wtf a widget is, it just draw things
-            // make sure we got right abstraction this time
-            fatalError()
-            // guard let built = engine.makeWidgetNode(
-            //     //wgpu:     wgpu,
-            //     width:    width,
-            //     height:   height,
-            //     adopting: base
-            // ) else {
-            //     print("PySulphurCanvasBase: render node creation failed")
-            //     return
-            // }
-            // node        = built.node
-            // thorTexture = built.texture
-            // // TODO resolved: the canvas's own `id` (UUID().hashValue) is the
-            // // slot id — the one identity the engine keys everything by.
-            // // engine.append(.init(id: ObjectIdentifier( built.node).hashValue, context: .thor(built.node)))
-            // engine.append(.init(id: id, context: .thor(built.node)))
+            // TODO(refactor): no node yet, and creating one is not this
+            // canvas's job — the window (which owns the engine) builds the
+            // node and re-attaches with it as `ownNode`. Until that handoff
+            // is wired the canvas simply waits with no node.
         } else if let frame = _frame {
             // Already-built node re-attaching under a frame that changed
             // while detached — same path as a live frame change.
             rebuildNode(width: Int(frame.size.x), height: Int(frame.size.y))
         }
         // A shader assigned before the node existed waits here — install it
-        // now that there is something to install on.
-        if let postShader, let node {
+        // once there is both a node and an engine to install through. The
+        // engine reference is the window's to supply (post shaders are the
+        // one place the canvas legitimately touches NucleantVulkan).
+        if let postShader, let engine, let node {
             do {
                 try postShader.attach(
                     engine: engine,
                     node:   node
                 )
             } catch {
-                print("PySulphurCanvasBase: pending post shader install failed: \(error)")
+                print("ThorCanvasBase: pending post shader install failed: \(error)")
             }
         }
         if _on_canvas != nil {

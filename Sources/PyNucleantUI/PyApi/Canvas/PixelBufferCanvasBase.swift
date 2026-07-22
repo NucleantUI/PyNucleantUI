@@ -38,8 +38,12 @@ public final class PixelBufferCanvasBase: PyCanvasBase {
     /// surface with real subpixels. 1 = the plain old direct-copy path.
     public let contentScale: Int
 
-    public private(set) var node: PixelBufferShaderNode?
-    public private(set) weak var engine: VulkanRenderEngine?
+    public typealias Node = PixelBufferShaderNode<RenderNode>
+    public private(set) var node: Node?
+    /// The engine reference is the window's to supply — the one place a
+    /// pixel canvas touches NucleantVulkan is installing a compute post
+    /// shader. nil until the window layer wires the handoff.
+    public private(set) weak var engine: RenderEngine?
 
     /// Held strongly so the compiled pipeline survives even if Python
     /// drops its own reference — same contract as `ThorCanvasBase`.
@@ -49,7 +53,7 @@ public final class PixelBufferCanvasBase: PyCanvasBase {
     /// node: step your machine, `write` your pixels. Installed Swift-side
     /// (e.g. `NesEmulator.connect`) — Python content goes through the
     /// `update_canvas` hook instead.
-    public var onFrame: ((PixelBufferShaderNode, Double) -> Void)?
+    public var onFrame: ((Node, Double) -> Void)?
 
     /// Recorded only — a pixel canvas never resizes its node from the
     /// frame, so unlike `ThorCanvasBase` there is nothing to observe.
@@ -59,8 +63,8 @@ public final class PixelBufferCanvasBase: PyCanvasBase {
         set { _frame = newValue }
     }
 
-    private weak var _owner: NucleantWidgetBase?
-    public var owner: NucleantWidgetBase? {
+    private weak var _owner: PyWidgetBase?
+    public var owner: PyWidgetBase? {
         get { _owner }
         set {
             _owner = newValue
@@ -106,45 +110,25 @@ public final class PixelBufferCanvasBase: PyCanvasBase {
     
 
 
-    /// Explicit witness for the `VulkanRenderNode?`-erased requirement:
-    /// without this, `PyCanvasBase`'s generic default (`ownNode as? Node`)
-    /// resolves back to itself instead of this concrete overload —
-    /// infinite recursion, stack overflow, no error printed. `ThorCanvasBase`
-    /// carries the same override for the same reason.
+    /// Bind into the render pipeline. Like the thor/skia canvases after the
+    /// refactor this is a passive holder: the CPU-fed render node is built
+    /// by the engine-owning layer (the window) and handed down as `ownNode`
+    /// — building it here was the engine's job in the old design and is
+    /// deliberately gone (see rules). The node is content-sized
+    /// (contentWidth×contentHeight×scale), not sized from the widget frame.
     public func attach(
-        engine:  VulkanRenderEngine,
-        wgpu:    WgpuContext,
-        ownNode: VulkanRenderNode?,
+        ownNode: Node?,
         width:   Int,
         height:  Int
     ) {
-        attach(engine: engine, wgpu: wgpu, ownNode: ownNode as? PixelBufferShaderNode, width: width, height: height)
-    }
-
-    public func attach(
-        engine:  VulkanRenderEngine,
-        wgpu:    WgpuContext,
-        ownNode: PixelBufferShaderNode?,
-        width:   Int,
-        height:  Int
-    ) {
-        self.engine = engine
-        // ownNode is the window root's thor node — a pixel canvas can't
-        // adopt it, so it is deliberately ignored; wgpu likewise (no
-        // ThorVG texture behind this canvas).
-        if node == nil {
-            guard let built = try? engine.makePixelBufferNode(
-                width:  contentWidth,
-                height: contentHeight,
-                scale:  contentScale
-            ) else {
-                print("PixelBufferCanvasBase: render node creation failed")
-                return
-            }
-            node = built
-            engine.append(.init(id: id, context: .pixel_buffer(built)))
+        if let ownNode {
+            node = ownNode
+        } else if node == nil {
+            // TODO(refactor): no node yet, and creating one is not this
+            // canvas's job — the window builds the content-sized
+            // PixelBufferShaderNode and re-attaches with it as `ownNode`.
         }
-        if let postShader, let node {
+        if let postShader, let engine, let node {
             do {
                 try postShader.attach(engine: engine, node: node)
             } catch {
@@ -152,19 +136,18 @@ public final class PixelBufferCanvasBase: PyCanvasBase {
             }
         }
         if _on_canvas != nil {
-            print("PixelBufferCanvasBase.attach: calling python on_canvas")
             on_canvas()
         }
-        print("PixelBufferCanvasBase.attach: done")
     }
 
+    /// Undo `attach`: drop the shader's pipeline, then take the node out of
+    /// the engine's composite list — `remove(id:)` frees the node's GPU
+    /// resources (staging buffer, image/view/memory, upload image) on the
+    /// way out.
     public func detach() {
-        // Keep the shader object (it reinstalls on re-attach), but its
-        // pipeline points at this node's image — tear that down with it.
         postShader?.detach()
-        if let node, let engine {
+        if node != nil, let engine {
             engine.remove(id: id)
-            engine.destroyResources(of: node)
         }
         node = nil
         owner = nil
@@ -199,17 +182,6 @@ public final class PixelBufferCanvasBase: PyCanvasBase {
         buffer.withUnsafeBytes { raw in
             node.write(pixels: raw)
         }
-    }
-
-    /// A pixel canvas carries no vector layer — paints have nowhere to
-    /// land. Part of the `PyCanvasBase` contract, so scene canvases that
-    /// resolve their host up the tree fail loudly instead of silently.
-    public func add(paint: Tvg_Paint) {
-        print("PixelBufferCanvasBase: add(paint:) ignored — no vector layer on a pixel canvas")
-    }
-
-    public func remove(paint: Tvg_Paint) {
-        // Nothing was ever added; nothing to remove.
     }
 
     /// Install a post shader on this canvas's render node — same single

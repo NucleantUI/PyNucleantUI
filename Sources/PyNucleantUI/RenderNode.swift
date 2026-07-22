@@ -6,15 +6,16 @@ import NucleantVulkan
 import CVulkan
 import NucleantSkia
 import NucleantThorVG
+import NucleantShader
 
 public typealias RenderEngine = VulkanRenderEngine<RenderNode>
 
-public final class RenderNode: RenderContainerNode {
+public final class RenderNode: RenderContainerNode, @unchecked Sendable {
     
     
-    public var id: Int
+    public let id: Int
     
-    public var context: Context
+    public let context: Context
     
     public var needsRender: Bool = true
     
@@ -29,6 +30,8 @@ public final class RenderNode: RenderContainerNode {
             observe(thorShaderNode)
         case .skia(let skiaShaderNode):
             observe(skiaShaderNode)
+        case .pixel_buffer(let pixelBufferShaderNode):
+            observe(pixelBufferShaderNode)
         }
     }
     
@@ -39,28 +42,32 @@ public final class RenderNode: RenderContainerNode {
             node.update(engine, slot: self, cmd: cmd)
         case .skia(let node):
             node.update(engine, slot: self, cmd: cmd)
+        case .pixel_buffer(let node):
+            node.update(engine, slot: self, cmd: cmd)
         }
     }
     
-    public func recordComposite(engine: Engine, cmd: VkCommandBuffer, viewport: VkViewport, scissor: VkRect2D) {
-        fatalError()
-    }
-    
     public func destroyResources(engine: Engine) {
+        // Each node kind frees exactly what it owns (see
+        // VulkanRenderNode.destroyResources). The window layer calls this
+        // when a slot is dropped (detach/resize) once the node handoff is
+        // wired; the slot just routes to its node.
+        
         switch context {
         case .thor(let node):
-            break
+            node.destroyResources(engine)
         case .skia(let node):
-            break
+            node.destroyResources(engine)
+        case .pixel_buffer(let node):
+            node.destroyResources(engine)
         }
     }
     
     public func getImageView() -> VkImageView? {
         switch context {
-        case .thor(let thorShaderNode):
-            thorShaderNode.imageView
-        case .skia(let skiaShaderNode):
-            skiaShaderNode.imageView
+        case .thor(let node): node.imageView
+        case .skia(let node): node.imageView
+        case .pixel_buffer(let node): node.imageView
         }
     }
 }
@@ -70,5 +77,6 @@ extension RenderNode {
     public enum Context: RenderNodeContext {
         case thor(ThorShaderNode<RenderNode>)
         case skia(SkiaShaderNode<RenderNode>)
+        case pixel_buffer(PixelBufferShaderNode<RenderNode>)
     }
 }

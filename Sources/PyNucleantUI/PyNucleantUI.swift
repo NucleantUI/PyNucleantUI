@@ -15,8 +15,8 @@ public struct PyNucleantUI_Package: PyModuleProtocol {
         //Canvas.self,
         //Layout.self,
         //UIX.self,
-        //AppModule.self,
-        //Window.self
+        AppModule.self,
+        Window.self
     ]
     
 }

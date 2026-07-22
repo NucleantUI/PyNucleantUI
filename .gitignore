@@ -11,3 +11,4 @@ DerivedData/
 # while the render/graphics stack is being split into sibling packages.
 /PyApi/
 /RenderEngine/
+build/
