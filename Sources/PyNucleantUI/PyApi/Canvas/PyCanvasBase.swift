@@ -2,8 +2,8 @@
 //  ThorCanvasBase.swift
 //  SulphurXcodeDemo
 //
-import SulphurCore
-import SulphurVulkan
+//import NucleantVulkan
+import NucleantVulkan
 import PySwiftKit
 import CWgpu
 import PySerializing
@@ -24,7 +24,7 @@ public protocol PyCanvasBase: CanvasBase, PySerializable, PyClassProtocol, AnyOb
     /// The widget holding this canvas. Canvases record their owner and
     /// widgets their parent — that chain is how nested scene canvases find
     /// the canvas they composite through.
-    var owner: NucleantWidgetBase? { get set }
+    var owner: PyWidgetBase? { get set }
 
     /// The frame that sizes this canvas — handed down by the owner widget
     /// on assignment and on every later frame change. nil keeps the old
@@ -37,9 +37,11 @@ public protocol PyCanvasBase: CanvasBase, PySerializable, PyClassProtocol, AnyOb
     /// `ownNode`) their render node here; scene canvases resolve the
     /// nearest ancestor canvas and add themselves to it — the engine
     /// context is theirs to ignore.
+    ///
+    // same problem again WE SHOULDNT HAVE TO SEND ENGINE OR WEBGPU
     func attach(
-        engine:  VulkanRenderEngine,
-       wgpu:    WgpuContext,
+        //engine:  VulkanRenderEngine,
+        // wgpu:    WgpuContext,
         ownNode: VulkanRenderNode?,
         width:   Int,
         height:  Int
@@ -47,13 +49,15 @@ public protocol PyCanvasBase: CanvasBase, PySerializable, PyClassProtocol, AnyOb
 }
 
 extension PyCanvasBase {
+    // same problem again WE SHOULDNT HAVE TO SEND ENGINE OR WEBGPU
     public func attach(
-        engine:  VulkanRenderEngine,
-        wgpu:    WgpuContext,
+        //engine:  VulkanRenderEngine,
+        //wgpu:    WgpuContext,
         ownNode: VulkanRenderNode?,
         width:   Int,
         height:  Int
     ) {
-        attach(engine: engine, wgpu: wgpu, ownNode: ownNode as? Node, width: width, height: height)
+        //(ownNode as! Node).attach
+        attach(ownNode: ownNode as? Node, width: width, height: height)
     }
 }

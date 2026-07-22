@@ -1,4 +1,0 @@
-//
-//  Shared.swift
-//
-import PyNucleantUI

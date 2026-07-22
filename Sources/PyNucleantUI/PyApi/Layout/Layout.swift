@@ -8,8 +8,8 @@
 import PySerializing
 import PySwiftWrapper
 
-import SulphurUI
-import SulphurCore
+//import SulphurUI
+//import NucleantVulkan
 
 
 
@@ -21,13 +21,7 @@ extension PyNucleantUI_Package {
     struct Layout: PyModuleProtocol {
         
         
-        
-        
-        @PyFunction()
-        static func init_core() {
-            print("called init_core", Self.self)
-        }
-        
+    
         
         
         

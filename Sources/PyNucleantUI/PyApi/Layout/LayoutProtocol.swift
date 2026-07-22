@@ -2,7 +2,7 @@
 //  LayoutProtocol.swift
 //  PyNucleantUI
 //
-import SulphurUI
+//import SulphurUI
 import simd
 
 // The widget stays out of the layout maths for now — it owns *when*

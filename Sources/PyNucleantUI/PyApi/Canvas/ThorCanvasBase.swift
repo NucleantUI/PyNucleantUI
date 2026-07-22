@@ -2,10 +2,12 @@
 //  ThorCanvasBase.swift
 //  PyNucleantUI
 //
-import SulphurCore
-import SulphurVulkan
+//import NucleantVulkan
+import NucleantThorVG
+import NucleantVulkan
+import NucleantShader
 import PySwiftKit
-import CWgpu
+//import CWgpu
 import PySerializing
 import PySwiftWrapper
 import Observation
@@ -28,10 +30,11 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
     
     public typealias Node = ThorShaderNode
     public private(set) var node: Node?
-    private var thorTexture: WGPUTexture?
-
-    public private(set) weak var engine: VulkanRenderEngine?
-    public private(set) weak var wgpu: WgpuContext?
+    //private var thorTexture: WGPUTexture?
+    
+    
+    public private(set) weak var engine: RenderEngine?
+    //public private(set) weak var wgpu: WgpuContext?
 
     /// Held strongly so the compiled pipeline survives even if Python
     /// drops its own reference.
@@ -78,8 +81,8 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
         }
     }
 
-    private weak var _owner: NucleantWidgetBase?
-    public var owner: NucleantWidgetBase? {
+    private weak var _owner: PyWidgetBase?
+    public var owner: PyWidgetBase? {
         get { _owner }
         set {
             _owner = newValue
@@ -94,49 +97,49 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
     /// the old node's image. Before `attach` this is a no-op: `attach`
     /// sizes the fresh node from the frame itself.
     private func rebuildNode(width: Int, height: Int) {
-        guard let engine, let wgpu, let oldNode = node else { return }
-        guard width > 0, height > 0,
-              oldNode.width != UInt32(width) || oldNode.height != UInt32(height)
-        else { return }
+        // guard let engine, let wgpu, let oldNode = node else { return }
+        // guard width > 0, height > 0,
+        //       oldNode.width != UInt32(width) || oldNode.height != UInt32(height)
+        // else { return }
 
-        // Build first — on failure the old node stays live and keeps
-        // drawing at the old size instead of the widget going dark.
-        guard let built = engine.makeWidgetNode(
-            wgpu:     wgpu,
-            width:    width,
-            height:   height,
-            adopting: base
-        ) else {
-            print("PySulphurCanvasBase: node rebuild at \(width)x\(height) failed, keeping old size")
-            return
-        }
+        // // Build first — on failure the old node stays live and keeps
+        // // drawing at the old size instead of the widget going dark.
+        // guard let built = engine.makeWidgetNode(
+        //     wgpu:     wgpu,
+        //     width:    width,
+        //     height:   height,
+        //     adopting: base
+        // ) else {
+        //     print("PySulphurCanvasBase: node rebuild at \(width)x\(height) failed, keeping old size")
+        //     return
+        // }
 
-        // The shader object survives, but its pipeline points at the old
-        // node's image — take it down (drains the GPU with it) before the
-        // old node leaves the composite.
-        postShader?.detach()
-        // engine.replace(oldNode, with: built.node)
-        // ^ slots are id-keyed now: same canvas id, new node in the same
-        //   z-position.
-        engine.replace(id: id, with: .thor(built.node))
+        // // The shader object survives, but its pipeline points at the old
+        // // node's image — take it down (drains the GPU with it) before the
+        // // old node leaves the composite.
+        // postShader?.detach()
+        // // engine.replace(oldNode, with: built.node)
+        // // ^ slots are id-keyed now: same canvas id, new node in the same
+        // //   z-position.
+        // engine.replace(id: id, with: .thor(built.node))
 
-        // makeWidgetNode retargeted `base` at the new texture, so the old
-        // texture and the old node's Vulkan image are only ours now.
-        engine.destroyResources(of: oldNode)
-        if let thorTexture {
-            wgpu.release(texture: thorTexture)
-        }
-        node        = built.node
-        thorTexture = built.texture
+        // // makeWidgetNode retargeted `base` at the new texture, so the old
+        // // texture and the old node's Vulkan image are only ours now.
+        // engine.destroyResources(of: oldNode)
+        // if let thorTexture {
+        //     wgpu.release(texture: thorTexture)
+        // }
+        // node        = built.node
+        // thorTexture = built.texture
 
-        if let postShader {
-            do {
-                try postShader.attach(engine: engine, node: built.node)
-            } catch {
-                print("PySulphurCanvasBase: post shader reinstall after resize failed: \(error)")
-            }
-        }
-        markDirty()
+        // if let postShader {
+        //     do {
+        //         try postShader.attach(engine: engine, node: built.node)
+        //     } catch {
+        //         print("PySulphurCanvasBase: post shader reinstall after resize failed: \(error)")
+        //     }
+        // }
+        // markDirty()
     }
 
 
@@ -179,25 +182,16 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
     public var width:  Int { node.map { Int($0.width)  } ?? 0 }
     public var height: Int { node.map { Int($0.height) } ?? 0 }
     
-    public func attach(
-        engine:  VulkanRenderEngine,
-        wgpu:    WgpuContext,
-        ownNode: VulkanRenderNode?,
-        width:   Int,
-        height:  Int
-    ) {
-        attach(engine: engine, wgpu: wgpu, ownNode: ownNode as? ThorShaderNode, width: width, height: height)
-    }
 
     public func attach(
-        engine:  VulkanRenderEngine,
-        wgpu:    WgpuContext,
+        engine:  RenderEngine,
+        //wgpu:    WgpuContext,
         ownNode: ThorShaderNode?,
         width:   Int,
         height:  Int
     ) {
         self.engine = engine
-        self.wgpu = wgpu
+        //self.wgpu = wgpu
         // Re-resolve the owner's frame here — `owner` is usually set before
         // the widget is parented, so the pull at owner-set time couldn't
         // see frames inherited down the tree yet. Direct `_frame` write on
@@ -217,21 +211,26 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
             let height = _frame.map { Int($0.size.y) } ?? height
             // The node adopts this canvas's own `base` — created at @PyInit —
             // so capsules Python took right after __init__ stay valid.
-            guard let built = engine.makeWidgetNode(
-                wgpu:     wgpu,
-                width:    width,
-                height:   height,
-                adopting: base
-            ) else {
-                print("PySulphurCanvasBase: render node creation failed")
-                return
-            }
-            node        = built.node
-            thorTexture = built.texture
-            // TODO resolved: the canvas's own `id` (UUID().hashValue) is the
-            // slot id — the one identity the engine keys everything by.
-            // engine.append(.init(id: ObjectIdentifier( built.node).hashValue, context: .thor(built.node)))
-            engine.append(.init(id: id, context: .thor(built.node)))
+            
+            // not the freaking engine job to make widgetNode
+            // engine dont know wtf a widget is, it just draw things
+            // make sure we got right abstraction this time
+            fatalError()
+            // guard let built = engine.makeWidgetNode(
+            //     //wgpu:     wgpu,
+            //     width:    width,
+            //     height:   height,
+            //     adopting: base
+            // ) else {
+            //     print("PySulphurCanvasBase: render node creation failed")
+            //     return
+            // }
+            // node        = built.node
+            // thorTexture = built.texture
+            // // TODO resolved: the canvas's own `id` (UUID().hashValue) is the
+            // // slot id — the one identity the engine keys everything by.
+            // // engine.append(.init(id: ObjectIdentifier( built.node).hashValue, context: .thor(built.node)))
+            // engine.append(.init(id: id, context: .thor(built.node)))
         } else if let frame = _frame {
             // Already-built node re-attaching under a frame that changed
             // while detached — same path as a live frame change.
@@ -266,7 +265,7 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
             engine.remove(id: id)
         }
         node = nil
-        thorTexture = nil
+        // thorTexture = nil // this belongs in the ShaderNode not here
         owner = nil
     }
 

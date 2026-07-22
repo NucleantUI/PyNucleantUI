@@ -7,16 +7,18 @@
 @preconcurrency import PySwiftKit
 @preconcurrency import PySerializing
 import PySwiftWrapper
-import SulphurApplication
+import NucleantApplication
 import AppKit
-import SulphurCore
+//import NucleantVulkan
+import NucleantThorVG
+
 
 @PyClass(
     name: "App",
     self_ref: true
 )
 
-class PyApp {
+final class PyApp: NucleantApplication {
     
     let __self__: PyPointer
     
@@ -37,7 +39,7 @@ class PyApp {
     private var _on_start: PyPointer
 
     #if os(macOS)
-    var appDelegate: AppDelegate?
+    var appDelegate: AppDelegate<PyApp>?
     #endif
     
     @PyMethod()
@@ -56,7 +58,7 @@ class PyApp {
     @PyMethod
     func open_registered_window(name: String) throws {
         if let py_cls = registeredWindows[name] {
-            let window = try WindowBase.casted(unsafe: PyObject_CallNoArgs(py_cls))
+            //let window = try WindowBase.casted(unsafe: PyObject_CallNoArgs(py_cls))
             // make window appear
             // PyObject_CallMethodNoArgs(self: UnsafeMutablePointer<PyObject>!, name: UnsafeMutablePointer<PyObject>!)
             // PyObject_CallMethodOneArg(self: UnsafeMutablePointer<PyObject>!, name: UnsafeMutablePointer<PyObject>!, arg: UnsafeMutablePointer<PyObject>!)
@@ -64,10 +66,14 @@ class PyApp {
         }
     }
     
-    @PyMethod
-    func open_window(window: WindowBase) throws {
-       //try window.present()
+    func onStart() {
+        
     }
+    
+    //@PyMethod
+    //func open_window(window: WindowBase) throws {
+       //try window.present()
+    //}
 }
 
 extension PyApp {
@@ -86,3 +92,5 @@ extension PyNucleantUI_Package {
         ]
     }
 }
+
+

@@ -6,10 +6,11 @@
 @preconcurrency import PySerializing
 import PySwiftWrapper
 
-import SulphurUI
-import SulphurCore
-import SulphurApplication
-
+//import SulphurUI
+//import NucleantVulkan
+import NucleantApplication
+import NucleantWindow
+import NucleantVulkan
 //import AppKit
 
 extension PyNucleantUI_Package {
@@ -29,7 +30,7 @@ extension PyNucleantUI_Package {
 @PyClass(
     self_ref: true
 )
-final class WindowBase: PyDeserialize {
+final class WindowBase: NucleantWindow, PyDeserialize {
     
     fileprivate weak var app: PyApp?
     
@@ -48,9 +49,9 @@ final class WindowBase: PyDeserialize {
     private let _on_key_down:          PyPointer = "on_key_down"
     private let _on_key_up:            PyPointer = "on_key_up"
     
-    var platformWindow: PlatformWindow?
-    var renderEngine: VulkanRenderEngine?
-    var rootWidget: NucleantWidgetBase?
+    //var platformWindow: PlatformWindow?
+    var renderEngine: VulkanRenderEngine<RenderNode>?
+    var rootWidget: PyWidgetBase?
     
     var win_rect: SIMD4<Int>
     
@@ -77,19 +78,19 @@ final class WindowBase: PyDeserialize {
     
     @PyMethod
     func present() throws {
-        let platformWindow = PlatformWindow(
-            contentRect: .init(x: win_rect.x, y: win_rect.y, width: win_rect.z, height: win_rect.w),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        self.renderEngine = try .init(metalLayer: platformWindow.metalLayer)
-        self.platformWindow = platformWindow
-        platformWindow.win_delegate = self
+        // let platformWindow = PlatformWindow(
+        //     contentRect: .init(x: win_rect.x, y: win_rect.y, width: win_rect.z, height: win_rect.w),
+        //     styleMask: [.titled, .closable, .miniaturizable, .resizable],
+        //     backing: .buffered,
+        //     defer: false
+        // )
+        // self.renderEngine = try .init(metalLayer: platformWindow.metalLayer)
+        // self.platformWindow = platformWindow
+        // platformWindow.win_delegate = self
         
-        platformWindow.makeKeyAndOrderFront(nil)
-        platformWindow.makeFirstResponder(nil)
-        rootWidget = try on_build()
+        // platformWindow.makeKeyAndOrderFront(nil)
+        // platformWindow.makeFirstResponder(nil)
+        // rootWidget = try on_build()
         attachRootWidget()
     }
 
@@ -99,20 +100,20 @@ final class WindowBase: PyDeserialize {
     /// every canvas in the tree owns its own node (`ownNode` stays nil);
     /// the engine is this window's, the wgpu context the process-wide one.
     private func attachRootWidget() {
-        guard let rootWidget, let renderEngine else { return }
-        guard let wgpu = WgpuContext.shared else {
-            print("WindowBase: no wgpu context — canvases stay unattached")
-            return
-        }
-        let drawable = renderEngine.metalLayer.drawableSize
-        let width  = drawable.width  > 0 ? Int(drawable.width)  : win_rect.z
-        let height = drawable.height > 0 ? Int(drawable.height) : win_rect.w
-        rootWidget.attach(
-            engine: renderEngine,
-            wgpu:   wgpu,
-            width:  width,
-            height: height
-        )
+        // guard let rootWidget, let renderEngine else { return }
+        // guard let wgpu = WgpuContext.shared else {
+        //     print("WindowBase: no wgpu context — canvases stay unattached")
+        //     return
+        // }
+        // let drawable = renderEngine.metalLayer.drawableSize
+        // let width  = drawable.width  > 0 ? Int(drawable.width)  : win_rect.z
+        // let height = drawable.height > 0 ? Int(drawable.height) : win_rect.w
+        // rootWidget.attach(
+        //     engine: renderEngine,
+        //     wgpu:   wgpu,
+        //     width:  width,
+        //     height: height
+        // )
     }
 
     /// Per display-link tick: Python's frame hook first (game state), then
@@ -129,7 +130,7 @@ final class WindowBase: PyDeserialize {
 
 extension WindowBase {
     
-    @PyCallMethod(path: \Self.__self__) func on_build() throws -> NucleantWidgetBase?
+    @PyCallMethod(path: \Self.__self__) func on_build() throws -> PyWidgetBase?
     @PyCallMethod(path: \Self.__self__) func on_frame(dt: Double)
     @PyCallMethod(path: \Self.__self__) func on_mouse_down(x: Double, y: Double)
     @PyCallMethod(path: \Self.__self__) func on_mouse_up(x: Double, y: Double)

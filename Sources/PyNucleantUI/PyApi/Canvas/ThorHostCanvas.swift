@@ -2,17 +2,17 @@
 //  ThorHostCanvas.swift
 //  PyNucleantUI
 //
-import SulphurCore
-import SulphurVulkan
+//import NucleantVulkan
+import NucleantVulkan
 import PySwiftKit
-import CWgpu
+//import CWgpu
 import PySerializing
 import PySwiftWrapper
 import Observation
 import Dispatch
 import Foundation
 
-
+import NucleantThorVG
 
 public protocol ThorHostCanvas: PySerializable, PyClassProtocol, AnyObject {
 
@@ -20,7 +20,7 @@ public protocol ThorHostCanvas: PySerializable, PyClassProtocol, AnyObject {
     /// The widget holding this canvas. Canvases record their owner and
     /// widgets their parent — that chain is how nested scene canvases find
     /// the canvas they composite through.
-    var owner: NucleantWidgetBase? { get set }
+    var owner: PyWidgetBase? { get set }
 
     /// The frame that sizes this canvas — handed down by the owner widget
     /// on assignment and on every later frame change. nil keeps the old
@@ -34,8 +34,8 @@ public protocol ThorHostCanvas: PySerializable, PyClassProtocol, AnyObject {
     /// nearest ancestor canvas and add themselves to it — the engine
     /// context is theirs to ignore.
     func attach(
-        engine:  VulkanRenderEngine,
-       wgpu:    WgpuContext,
+        //engine:  VulkanRenderEngine,
+        //wgpu:    WgpuContext,
         ownNode: ThorShaderNode?,
         width:   Int,
         height:  Int

@@ -4,7 +4,8 @@
 //
 import PySwiftKit
 import PySerializing
-import SulphurUI
+import NucleantVulkan
+//import SulphurUI
 
 public protocol CanvasBase: AnyObject, Identifiable {
 
@@ -28,9 +29,11 @@ public protocol CanvasBase: AnyObject, Identifiable {
     /// nearest ancestor canvas and add themselves to it — the engine
     /// context is theirs to ignore.
     associatedtype Node: VulkanRenderNode
+    
+    // same problem again WE SHOULDNT HAVE TO SEND ENGINE OR WEBGPU
     func attach(
-        engine:  VulkanRenderEngine,
-        wgpu:    WgpuContext,
+        //engine:  VulkanRenderEngine,
+        //wgpu:    WgpuContext,
         ownNode: Node?,
         width:   Int,
         height:  Int

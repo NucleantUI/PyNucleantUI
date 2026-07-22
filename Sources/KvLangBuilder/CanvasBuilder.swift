@@ -4,7 +4,7 @@
 //
 import KivyWidgetRegistry
 import KvParser
-import SulphurUI
+//import SulphurUI
 import PySwiftAST
 import PySwiftKit
 
