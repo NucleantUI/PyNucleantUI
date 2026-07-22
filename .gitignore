@@ -6,3 +6,8 @@ DerivedData/
 .swiftpm/configuration/registries.json
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
+
+# Reference-only copies of pre-refactor code, kept outside Sources/
+# while the render/graphics stack is being split into sibling packages.
+/PyApi/
+/RenderEngine/
