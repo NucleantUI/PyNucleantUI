@@ -181,7 +181,15 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
 
     public var width:  Int { node.map { Int($0.width)  } ?? 0 }
     public var height: Int { node.map { Int($0.height) } ?? 0 }
-    
+
+    /// The window (engine owner) supplies its engine here before handing the
+    /// built node down through `attach` — same sanctioned handoff as the
+    /// other canvases (post shader / detach only; never used to build a node).
+    func bind(engine: RenderEngine) {
+        self.engine = engine
+    }
+
+
 
     /// Bind into the render pipeline. The canvas is a passive holder now:
     /// the render node is built by the engine-owning layer (the window) and

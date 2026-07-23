@@ -11,7 +11,10 @@ import PySwiftWrapper
 import NucleantApplication
 import NucleantWindow
 import NucleantVulkan
-//import AppKit
+#if os(macOS)
+import AppKit
+import Platform_MacOS
+#endif
 
 extension PyNucleantUI_Package {
     
@@ -49,7 +52,12 @@ final class WindowBase: NucleantWindow, PyDeserialize {
     private let _on_key_down:          PyPointer = "on_key_down"
     private let _on_key_up:            PyPointer = "on_key_up"
     
-    //var platformWindow: PlatformWindow?
+    #if os(macOS)
+    // Strongly held: PlatformWindow keeps only a weak `win_delegate` back to
+    // us, and AppKit's own retain of an ordered-front window isn't a contract
+    // to rely on — the window's lifetime is this object's to own.
+    var platformWindow: PlatformWindow<WindowBase>?
+    #endif
     var renderEngine: VulkanRenderEngine<RenderNode>?
     var rootWidget: PyWidgetBase?
     
@@ -78,42 +86,44 @@ final class WindowBase: NucleantWindow, PyDeserialize {
     
     @PyMethod
     func present() throws {
-        // let platformWindow = PlatformWindow(
-        //     contentRect: .init(x: win_rect.x, y: win_rect.y, width: win_rect.z, height: win_rect.w),
-        //     styleMask: [.titled, .closable, .miniaturizable, .resizable],
-        //     backing: .buffered,
-        //     defer: false
-        // )
-        // self.renderEngine = try .init(metalLayer: platformWindow.metalLayer)
-        // self.platformWindow = platformWindow
-        // platformWindow.win_delegate = self
-        
-        // platformWindow.makeKeyAndOrderFront(nil)
-        // platformWindow.makeFirstResponder(nil)
-        // rootWidget = try on_build()
-        attachRootWidget()
-    }
+        #if os(macOS)
+        // 1. Platform window + its CAMetalLayer-backed view. The view starts
+        //    a display link straight away; it no-ops until `win_delegate` and
+        //    the engine below are in place (both nil-guarded in onFrame).
+        let platformWindow = PlatformWindow<WindowBase>(
+            contentRect: NSRect(
+                x:      Double(win_rect.x),
+                y:      Double(win_rect.y),
+                width:  Double(win_rect.z),
+                height: Double(win_rect.w)
+            ),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing:   .buffered,
+            defer:     false
+        )
 
-    /// Bind the tree `on_build` returned into this window's engine: the
-    /// context handed down here is what makes each canvas build its render
-    /// node and join the engine's composite list. No pre-built root node —
-    /// every canvas in the tree owns its own node (`ownNode` stays nil);
-    /// the engine is this window's, the wgpu context the process-wide one.
-    private func attachRootWidget() {
-        // guard let rootWidget, let renderEngine else { return }
-        // guard let wgpu = WgpuContext.shared else {
-        //     print("WindowBase: no wgpu context — canvases stay unattached")
-        //     return
-        // }
-        // let drawable = renderEngine.metalLayer.drawableSize
-        // let width  = drawable.width  > 0 ? Int(drawable.width)  : win_rect.z
-        // let height = drawable.height > 0 ? Int(drawable.height) : win_rect.w
-        // rootWidget.attach(
-        //     engine: renderEngine,
-        //     wgpu:   wgpu,
-        //     width:  width,
-        //     height: height
-        // )
+        // 2. The Vulkan engine renders into that layer. We own the engine;
+        //    canvases only ever receive nodes it builds (see attachTree).
+        let engine = try RenderEngine(metalLayer: platformWindow.metalLayer)
+        self.renderEngine   = engine
+        self.platformWindow = platformWindow
+        platformWindow.win_delegate = self
+
+        // 3. Build the Python widget tree and bind it into the engine. The
+        //    window owns the engine and the tree; how a canvas maps to a
+        //    render node is the RenderBinder seam's business, not ours — we
+        //    never name a canvas kind here.
+        let root = try on_build()
+        rootWidget = root
+        if let root {
+            RenderBinder.bind(tree: root, into: engine, width: win_rect.z, height: win_rect.w)
+        }
+
+        // 4. Show it.
+        platformWindow.title = "Nucleant"
+        platformWindow.makeKeyAndOrderFront(nil)
+        platformWindow.makeFirstResponder(platformWindow.contentView)
+        #endif
     }
 
     /// Per display-link tick: Python's frame hook first (game state), then
@@ -142,4 +152,12 @@ extension WindowBase {
     @PyCallMethod(path: \Self.__self__) func on_key_down(keyCode: UInt16, characters: String?)
     @PyCallMethod(path: \Self.__self__) func on_key_up(keyCode: UInt16, characters: String?)
 }
+
+#if os(macOS)
+// PlatformWindow routes AppKit events to its `win_delegate` through
+// WindowBaseDelegate; the mapping to our `on_*` Python hooks is the default
+// implementation on `NucleantWindow where Self: WindowBaseDelegate`
+// (Platform_MacOS), so declaring the conformance is all that's needed.
+extension WindowBase: WindowBaseDelegate {}
+#endif
 

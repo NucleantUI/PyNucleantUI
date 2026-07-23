@@ -39,6 +39,7 @@ let package = Package(
                 //.product(name: "SulphurCore", package: "SulphurCore"),
                 .product(name: "NucleantApplication", package: "NucleantApplication"),
                 .product(name: "NucleantWindow", package: "NucleantApplication"),
+                .product(name: "Platform_MacOS", package: "NucleantApplication", condition: .when(platforms: [.macOS])),
                 .product(name: "NucleantSkia", package: "NucleantSkia"),
                 .product(name: "NucleantThorVG", package: "NucleantThorVG"),
                 .product(name: "NucleantVulkan", package: "NucleantVulkan"),

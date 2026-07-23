@@ -90,7 +90,7 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
             let assigned: (any PyCanvasBase)? = switch newValue {
             case ThorCanvasBase.PyType: try? ThorCanvasBase.casted(unsafe: newValue)
             //case ThorSceneBase.PyType: try? ThorSceneBase.casted(unsafe: newValue)
-            //case PixelBufferCanvasBase.PyType: try? PixelBufferCanvasBase.casted(unsafe: newValue)
+            case PixelBufferCanvasBase.PyType: try? PixelBufferCanvasBase.casted(unsafe: newValue)
             case SkiaCanvasBase.PyType: try? SkiaCanvasBase.casted(unsafe: newValue)
             default: nil
             }

@@ -67,7 +67,10 @@ final class PyApp: NucleantApplication {
     }
     
     func onStart() {
-        
+        // Platform launch (NSApplicationDelegate.applicationDidFinishLaunching)
+        // lands here — bridge it into Python's `on_start`, where the app
+        // subclass builds initial state and presents its window(s).
+        on_start()
     }
     
     //@PyMethod

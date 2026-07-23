@@ -107,7 +107,15 @@ public final class PixelBufferCanvasBase: PyCanvasBase {
 
     public var width:  Int { contentWidth }
     public var height: Int { contentHeight }
-    
+
+    /// The window (engine owner) supplies its engine here before handing the
+    /// built node down through `attach` — same sanctioned handoff as the
+    /// other canvases (post shader / detach only; never used to build a node).
+    func bind(engine: RenderEngine) {
+        self.engine = engine
+    }
+
+
 
 
     /// Bind into the render pipeline. Like the thor/skia canvases after the

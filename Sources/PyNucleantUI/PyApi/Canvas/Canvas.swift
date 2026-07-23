@@ -1,9 +1,17 @@
+//
+//  Canvas.swift
+//  PyNucleantUI
+//
+//  Created by CodeBuilder on 23/07/2026.
+//
+
+
 
 @preconcurrency import PySwiftKit
 @preconcurrency import PySerializing
 import PySwiftWrapper
 
-import SulphurUI
+//mport SulphurUI
 //import NucleantVulkan
 
 extension PyNucleantUI_Package {
@@ -13,7 +21,7 @@ extension PyNucleantUI_Package {
         
         static let py_classes: [any (PyClassProtocol & AnyObject).Type] = [
             ThorCanvasBase.self,
-            ThorSceneBase.self,
+            //ThorSceneBase.self,
             PixelBufferCanvasBase.self,
             SkiaCanvasBase.self,
             CanvasShader.self

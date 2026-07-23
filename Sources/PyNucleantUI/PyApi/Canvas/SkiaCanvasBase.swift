@@ -135,6 +135,15 @@ public final class SkiaCanvasBase: PyCanvasBase, SkiaGPUCanvas, PyCapsuleProtoco
     public var width:  Int { node.map { Int($0.width)  } ?? 0 }
     public var height: Int { node.map { Int($0.height) } ?? 0 }
 
+    /// The window (engine owner) supplies its engine here before handing the
+    /// built node down through `attach`. This is the one place a canvas
+    /// legitimately holds a NucleantVulkan reference — it's needed to install
+    /// a compute post shader and to pull the node out of the composite list
+    /// on `detach`. The canvas never uses it to *build* a node.
+    func bind(engine: RenderEngine) {
+        self.engine = engine
+    }
+
     /// Bind into the render pipeline. The render node is built by the
     /// window (which owns the engine and the Ganesh context) and handed
     /// down as `ownNode`.
