@@ -60,13 +60,15 @@ public enum LayoutSystem {
     /// (children start at `container.pos`, i.e. absolute when the container
     /// frame is absolute).
     ///
-    /// Children with a frame keep their size and are only re-positioned.
-    /// `nil` children split the leftover length equally and fill the cross
-    /// axis — swift-cross-ui proposes
-    /// `(length - spaceUsed - reservedSpace) / childrenRemaining` to each
-    /// child in flexibility order; with all fixed sizes known up front that
-    /// walk reduces to this equal split of what fixed children and spacing
-    /// leave over.
+    /// Children keep their size on any axis they fix, and are re-positioned.
+    /// A child is *flexible* on an axis when it is `nil` (flexible on both) or
+    /// its frame flags that axis (`flexibleWidth` / `flexibleHeight`).
+    /// Flexible stack-axis children split the leftover length equally;
+    /// flexible cross-axis children fill the container — swift-cross-ui
+    /// proposes `(length - spaceUsed - reservedSpace) / childrenRemaining` to
+    /// each child in flexibility order; with all fixed sizes known up front
+    /// that walk reduces to this equal split of what fixed children and
+    /// spacing leave over.
     ///
     /// Returns one frame per child, in child order. `SIMD4` (x, y, w, h) is
     /// the plain frame value SulphurUI already treats as a `FrameProtocol`.
@@ -79,11 +81,24 @@ public enum LayoutSystem {
     ) -> [SIMD4<Double>] {
         let cross = orientation.perpendicular
 
+        // A `nil` child is flexible on both axes; a present child is flexible
+        // only where its frame flags say so. Flexible == "no fixed extent
+        // here", i.e. the layout supplies the size on that axis.
+        func flexible(_ child: Frame?, along axis: Orientation) -> Bool {
+            guard let child else { return true }
+            switch axis {
+            case .horizontal: return child.flexibleWidth
+            case .vertical: return child.flexibleHeight
+            }
+        }
+
         let totalSpacing = spacing * Double(max(children.count - 1, 0))
         let fixedLength = children.reduce(0.0) { total, child in
-            total + (child?.size[component: orientation] ?? 0)
+            flexible(child, along: orientation)
+                ? total
+                : total + (child?.size[component: orientation] ?? 0)
         }
-        let flexibleCount = children.filter { $0 == nil }.count
+        let flexibleCount = children.filter { flexible($0, along: orientation) }.count
         let leftover = max(
             container.size[component: orientation] - fixedLength - totalSpacing,
             0
@@ -96,12 +111,12 @@ public enum LayoutSystem {
         var offset = container.pos[component: orientation]
         for child in children {
             var size = SIMD2<Double>.zero
-            if let child {
-                size = child.size
-            } else {
-                size[component: orientation] = flexibleLength
-                size[component: cross] = container.size[component: cross]
-            }
+            size[component: orientation] = flexible(child, along: orientation)
+                ? flexibleLength
+                : (child?.size[component: orientation] ?? 0)
+            size[component: cross] = flexible(child, along: cross)
+                ? container.size[component: cross]
+                : (child?.size[component: cross] ?? 0)
 
             let slack = container.size[component: cross] - size[component: cross]
             let crossOffset: Double = switch alignment {

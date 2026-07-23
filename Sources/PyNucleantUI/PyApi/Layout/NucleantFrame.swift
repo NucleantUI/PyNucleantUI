@@ -34,19 +34,37 @@ public final class NucleantFrame: FrameProtocol {
     
     @PyProperty
     public var flexible_width: Bool = false
-    
+
     @PyProperty
     public var flexible_height: Bool = false
-    
+
+    /// Bridge the Python-facing snake_case flags onto `FrameProtocol`, so the
+    /// layout maths read flexibility the same way for every frame type.
+    public var flexibleWidth: Bool { flexible_width }
+    public var flexibleHeight: Bool { flexible_height }
+
     public init(pos: SIMD2<Double>, size: SIMD2<Double>) {
         self.pos = pos
         self.size = size
     }
-    
+
     @PyInit
     init(x: Double, y: Double, w: Double, h: Double) {
         pos = .init(x, y)
         size = .init(w, h)
+    }
+
+    /// The concrete stand-in for a `nil` child: no fixed extent on either
+    /// axis, so a stack layout resolves its position and size. Absent a
+    /// layout its `size` stays whatever it was seeded with (defaults to the
+    /// nearest ancestor's size when the widget hands its own frame down).
+    public convenience init(
+        flexible pos: SIMD2<Double> = .zero,
+        size: SIMD2<Double> = .zero
+    ) {
+        self.init(pos: pos, size: size)
+        flexible_width = true
+        flexible_height = true
     }
 }
 

@@ -48,14 +48,19 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
 
     var __self__: PyPointer
     
-    private var _frame: NucleantFrame?
+    /// The widget's one and only frame. Defaults to a both-axes flexible
+    /// frame, so a widget that never sets one is sized by the layout — it
+    /// takes the remaining parent space (SwiftUI's no-frame behaviour)
+    /// instead of inheriting the parent's frame as a fixed size. Assigning
+    /// `frame = None` from Python resets it back to flexible.
+    private var _frame: NucleantFrame = NucleantFrame(flexible: .zero)
+
     public var frame: NucleantFrame? {
-        get { _frame ?? parent?.frame }
+        get { _frame }
         set {
-            _frame = newValue
-            // Reading back through the getter resolves the parent fallback
-            // when the own frame was just cleared. On a live node canvas
-            // this is what triggers the render-node resize.
+            _frame = newValue ?? NucleantFrame(flexible: .zero)
+            // On a live node canvas, handing the (possibly just-reset) frame
+            // down is what triggers the render-node resize.
             _canvas?.frame = frame
         }
     }
