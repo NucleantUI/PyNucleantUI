@@ -8,7 +8,7 @@
 import PySerializing
 import PySwiftWrapper
 
-//import SulphurUI
+import SulphurUI
 //import NucleantVulkan
 
 
@@ -20,14 +20,15 @@ extension PyNucleantUI_Package {
     @PyModule(name: "nucleant.layout")
     struct Layout: PyModuleProtocol {
         
-        static let py_classes: [any (PyClassProtocol & AnyObject).Type] = [
-            NucleantFrame.self
-        ]
         
-    
-        static let modules: [any PyModuleProtocol.Type] = [
-            
-        ]
+        
+        
+        @PyFunction()
+        static func init_core() {
+            print("called init_core", Self.self)
+        }
+        
+        
         
         
     } // Layout

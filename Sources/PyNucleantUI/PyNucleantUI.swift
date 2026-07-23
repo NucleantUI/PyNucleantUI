@@ -4,24 +4,23 @@
 import PySerializing
 import PySwiftWrapper
 
-import SulphurUI
-import SulphurCore
-import SulphurApplication
+//import SulphurUI
+//import NucleantVulkan
+//import SulphurApplication
 
 @PyModule(name: "nucleant")
 public struct PyNucleantUI_Package: PyModuleProtocol {
     
-    @PyFunction()
-    public static func init_core() {
-        print("called init_core", Self.self)
-        
-    }
-    
     public static let modules: [any (PyModuleProtocol).Type] = [
-        Layout.self,
-        UIX.self,
+        
+        //Layout.self,
+        //UIX.self,
         AppModule.self,
+        Canvas.self,
+        Widget.self,
         Window.self
     ]
     
 }
+
+
