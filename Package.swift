@@ -21,9 +21,9 @@ func getDependencies() -> [Package.Dependency] {
     } else {
         deps.append(contentsOf: [
             .package(url: "https://github.com/NucleantUI/NucleantApplication", branch: "master"),
-            .package(url: "https://github.com/NucleantUI/NucleantVulkan", branch: "refactor"),
-            .package(url: "https://github.com/NucleantUI/NucleantSkia", branch: "refactor"),
-            .package(url: "https://github.com/NucleantUI/NucleantThorVG", branch: "refactor")
+            .package(url: "https://github.com/NucleantUI/NucleantVulkan", branch: "master"),
+            .package(url: "https://github.com/NucleantUI/NucleantSkia", branch: "master"),
+            .package(url: "https://github.com/NucleantUI/NucleantThorVG", branch: "master")
         ])
     }
     
