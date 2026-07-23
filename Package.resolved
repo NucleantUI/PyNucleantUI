@@ -1,6 +1,51 @@
 {
-  "originHash" : "d279bd761974da5a0d7538d2db420b9ddfa4cd8cd48373a46dc2671728385136",
+  "originHash" : "1e0b0bcce9df32254827a2f94e6f6af29a09d9a26d80ec4518f88d00c201f835",
   "pins" : [
+    {
+      "identity" : "cpython",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/py-swift/CPython",
+      "state" : {
+        "branch" : "master",
+        "revision" : "b06909250a2be22c1814b8fec7b0c46d375f9595"
+      }
+    },
+    {
+      "identity" : "nucleantapplication",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/NucleantUI/NucleantApplication",
+      "state" : {
+        "branch" : "master",
+        "revision" : "1275ab4de61d2c0dc7227c6a63abab4295520c93"
+      }
+    },
+    {
+      "identity" : "nucleantskia",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/NucleantUI/NucleantSkia",
+      "state" : {
+        "branch" : "refactor",
+        "revision" : "76270c0a65fac6c2050382999d854c22500d843d"
+      }
+    },
+    {
+      "identity" : "nucleantthorvg",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/NucleantUI/NucleantThorVG",
+      "state" : {
+        "branch" : "refactor",
+        "revision" : "1b07e700b0a4cdad93a74261bb1d04d7e53f3cc1"
+      }
+    },
+    {
+      "identity" : "nucleantvulkan",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/NucleantUI/NucleantVulkan",
+      "state" : {
+        "branch" : "refactor",
+        "revision" : "5da2cedff733ac3dc7bf4f049551aa97d6b4beec"
+      }
+    },
     {
       "identity" : "pyswiftast",
       "kind" : "remoteSourceControl",
@@ -8,6 +53,24 @@
       "state" : {
         "branch" : "master",
         "revision" : "c757b0d9e7975b59d3c670fea8a99b043e2cb4ba"
+      }
+    },
+    {
+      "identity" : "pyswiftkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Py-Swift/PySwiftKit",
+      "state" : {
+        "branch" : "master",
+        "revision" : "bc48bf8e8709c39609d450831b8e02d870652fc9"
+      }
+    },
+    {
+      "identity" : "sulphurgeometry",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/NucleantUI/SulphurGeometry",
+      "state" : {
+        "branch" : "init_upload",
+        "revision" : "4ed1341820364d5223469ca201ffcce48b901d2b"
       }
     },
     {
