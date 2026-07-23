@@ -1,7 +1,50 @@
-// swift-tools-version: 6.1
+// swift-tools-version: 6.2
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
+
+let nucleantDev = false
+let pskDev = false
+
+func getDependencies() -> [Package.Dependency] {
+    var deps = [Package.Dependency]()
+    
+    
+    
+    if nucleantDev {
+        deps.append(contentsOf: [
+            .package(path: "../NucleantApplication"),
+            .package(path: "../NucleantVulkan"),
+            .package(path: "../NucleantSkia"),
+            .package(path: "../NucleantThorVG"),
+        ])
+    } else {
+        deps.append(contentsOf: [
+            .package(url: "https://github.com/NucleantUI/NucleantApplication", branch: "master"),
+            .package(url: "https://github.com/NucleantUI/NucleantVulkan", branch: "refactor"),
+            .package(url: "https://github.com/NucleantUI/NucleantSkia", branch: "refactor"),
+            .package(url: "https://github.com/NucleantUI/NucleantThorVG", branch: "refactor")
+        ])
+    }
+    
+    if pskDev {
+        deps.append(contentsOf: [
+            .package(path: "/Volumes/CodeSSD/dev_projects/pyswiftkit/PySwiftKit"),
+        ])
+    } else {
+        deps.append(contentsOf: [
+            .package(url: "https://github.com/Py-Swift/PySwiftKit", branch: "master"),
+        ])
+    }
+    
+    deps.append(contentsOf: [
+        .package(url: "https://github.com/Py-Swift/SwiftyKvLang", branch: "master"),
+        .package(url: "https://github.com/Py-Swift/PySwiftAST.git", branch: "master"),
+        //.package(path: "/Volumes/CodeSSD/dev_projects/pyswiftkit/PyFileGenerator")
+    ])
+    
+    return deps
+}
 
 let package = Package(
     name: "PyNucleantUI",
@@ -18,17 +61,7 @@ let package = Package(
             targets: ["PyNucleantUI"]
         ),
     ],
-    dependencies: [
-        .package(path: "../NucleantApplication"),
-        .package(path: "../NucleantVulkan"),
-        .package(path: "../NucleantSkia"),
-        .package(path: "../NucleantThorVG"),
-        //.package(path: "/Volumes/CodeSSD/dev_projects/sulphur_dev/SulphurShader"),
-        .package(path: "/Volumes/CodeSSD/dev_projects/pyswiftkit/PySwiftKit"),
-        .package(url: "https://github.com/Py-Swift/SwiftyKvLang", branch: "master"),
-        .package(url: "https://github.com/Py-Swift/PySwiftAST.git", branch: "master"),
-        .package(path: "/Volumes/CodeSSD/dev_projects/pyswiftkit/PyFileGenerator")
-    ],
+    dependencies: getDependencies(),
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
@@ -36,6 +69,7 @@ let package = Package(
             name: "PyNucleantUI",
             dependencies: [
                 "KvLangBuilder",
+                "PyNucleantBuffer",
                 //.product(name: "SulphurCore", package: "SulphurCore"),
                 .product(name: "NucleantApplication", package: "NucleantApplication"),
                 .product(name: "NucleantWindow", package: "NucleantApplication"),
@@ -54,6 +88,25 @@ let package = Package(
                 .linkedFramework("Python")
             ]
         ),
+        // The Python-buffer node kind, kept out of the engine (it speaks
+        // CPython, so it is the opposite of the "generic only" bar for
+        // shader-node code living in VulkanRenderEngine) and out of the
+        // PyNucleantUI target itself, so the node and its engine extension
+        // can be built and reasoned about without the whole PyApi surface.
+            .target(
+                name: "PyNucleantBuffer",
+                dependencies: [
+                    .product(name: "NucleantVulkan", package: "NucleantVulkan"),
+                    .product(name: "VulkanCore", package: "NucleantVulkan"),
+                    .product(name: "PySwiftKit", package: "PySwiftKit"),
+                ],
+                swiftSettings: [
+                    .swiftLanguageMode(.v5)
+                ],
+                linkerSettings: [
+                    .linkedFramework("Python")
+                ]
+            ),
         .target(
             name: "KvLangBuilder",
             dependencies: [

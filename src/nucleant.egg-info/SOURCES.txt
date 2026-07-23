@@ -1,6 +1,5 @@
 pyproject.toml
 src/nucleant/__init__.py
-src/nucleant/__init__.pyi
 src/nucleant/app.py
 src/nucleant/app.pyi
 src/nucleant/canvas.py

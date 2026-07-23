@@ -1,10 +1,12 @@
 """nucleant.canvas — ThorCanvasBase, SkiaCanvasBase, PixelBufferCanvasBase,
-CanvasShader (`@PyClass`).
+PyBufferCanvasBase, CanvasShader (`@PyClass`).
 
 NOTE: not yet registered in `PyNucleantUI_Package.modules` / any active
 `py_classes`; the classes are defined and annotated but the module wiring is
 pending.
 """
+
+from collections.abc import Buffer
 
 
 class CanvasShader:
@@ -74,6 +76,55 @@ class PixelBufferCanvasBase:
 
         Accepts anything satisfying the buffer protocol (bytes, bytearray,
         memoryview over numpy/ctypes/array.array, …).
+        """
+        ...
+
+    def add_shader(self, index: int, shader: CanvasShader) -> None:
+        """Install a compute post shader (only one slot; `index` ignored)."""
+        ...
+
+    def update_shader(self, shader: CanvasShader | None) -> None:
+        """Swap the post shader, or None to run the pixels bare."""
+        ...
+
+
+class PyBufferCanvasBase:
+    """A widget's buffer-protocol-fed, fixed-resolution pixel canvas (`@PyClass`).
+
+    The sibling of `PixelBufferCanvasBase`, and the difference is the reason
+    it exists: `write` reads the producer object *directly* through the
+    buffer protocol, so any object exporting a buffer works with no
+    `memoryview()` wrapper — including extension types with a `bf_getbuffer`
+    slot of their own, e.g. a `nucleant.nes.NesLayer`::
+
+        canvas.write(nes.background_layer)
+
+    `PixelBufferCanvasBase.write` deserializes to `Data`, which only accepts
+    bytes/bytearray/memoryview by concrete type. Reach for this canvas when
+    the producer *is* a buffer object; reach for that one when you already
+    hold bytes.
+
+    Otherwise identical: some producer fills `width`x`height` RGBA8 pixels
+    every frame, the composite pass scales the image to the window, and
+    `scale` is an integer GPU up-scale so a post shader sees real subpixels.
+    """
+
+    def __init__(self, width: int, height: int, scale: int) -> None:
+        """Fixed content resolution (`width`x`height`) and integer up-scale."""
+        ...
+
+    # Optional override hooks (`@PyCall`) — the canvas calls them only if
+    # the subclass defines them (guarded), so they stay concrete, not abstract.
+    def on_canvas(self) -> None: ...
+    def update_canvas(self, dt: float) -> None: ...
+
+    def write(self, buffer: Buffer) -> None:
+        """Hand one frame of tightly-packed RGBA8 to the node, read straight
+        out of `buffer` via `PyObject_GetBuffer`.
+
+        Short input fills what it covers; excess bytes are ignored. Raises
+        `BufferError` if the object doesn't export a buffer. A no-op before
+        the canvas is attached to a node.
         """
         ...
 

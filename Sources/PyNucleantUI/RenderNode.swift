@@ -7,6 +7,7 @@ import CVulkan
 import NucleantSkia
 import NucleantThorVG
 import NucleantShader
+import PyNucleantBuffer
 
 public typealias RenderEngine = VulkanRenderEngine<RenderNode>
 
@@ -32,6 +33,8 @@ public final class RenderNode: RenderContainerNode, @unchecked Sendable {
             observe(skiaShaderNode)
         case .pixel_buffer(let pixelBufferShaderNode):
             observe(pixelBufferShaderNode)
+        case .py_buffer(let pyBufferShaderNode):
+            observe(pyBufferShaderNode)
         }
     }
     
@@ -43,6 +46,8 @@ public final class RenderNode: RenderContainerNode, @unchecked Sendable {
         case .skia(let node):
             node.update(engine, slot: self, cmd: cmd)
         case .pixel_buffer(let node):
+            node.update(engine, slot: self, cmd: cmd)
+        case .py_buffer(let node):
             node.update(engine, slot: self, cmd: cmd)
         }
     }
@@ -60,6 +65,8 @@ public final class RenderNode: RenderContainerNode, @unchecked Sendable {
             node.destroyResources(engine)
         case .pixel_buffer(let node):
             node.destroyResources(engine)
+        case .py_buffer(let node):
+            node.destroyResources(engine)
         }
     }
     
@@ -68,6 +75,7 @@ public final class RenderNode: RenderContainerNode, @unchecked Sendable {
         case .thor(let node): node.imageView
         case .skia(let node): node.imageView
         case .pixel_buffer(let node): node.imageView
+        case .py_buffer(let node): node.imageView
         }
     }
 }
@@ -78,6 +86,7 @@ extension RenderNode {
         case thor(ThorShaderNode<RenderNode>)
         case skia(SkiaShaderNode<RenderNode>)
         case pixel_buffer(PixelBufferShaderNode<RenderNode>)
+        case py_buffer(PyBufferShaderNode<RenderNode>)
     }
 }
 
@@ -156,6 +165,25 @@ public enum RenderBinder {
                 pixel.attach(ownNode: node, width: pixel.contentWidth, height: pixel.contentHeight)
             } catch {
                 print("RenderBinder: pixel buffer node build failed: \(error)")
+            }
+
+        case let pyBuffer as PyBufferCanvasBase:
+            // Same content-sized contract as the pixel canvas; the node
+            // differs only in reading its bytes through Python's buffer
+            // protocol rather than from Swift-held ones.
+            do {
+                let node = try engine.makePyBufferNode(
+                    width:  pyBuffer.contentWidth,
+                    height: pyBuffer.contentHeight,
+                    scale:  pyBuffer.contentScale
+                )
+                pyBuffer.bind(engine: engine)
+                let slot = RenderNode(id: pyBuffer.id, context: .py_buffer(node))
+                slot.observeContext()
+                engine.append(slot)
+                pyBuffer.attach(ownNode: node, width: pyBuffer.contentWidth, height: pyBuffer.contentHeight)
+            } catch {
+                print("RenderBinder: py buffer node build failed: \(error)")
             }
 
         case let thor as ThorCanvasBase:

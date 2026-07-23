@@ -5,9 +5,9 @@ NOTE: not yet registered in `PyNucleantUI_Package.modules` / any active
 pending. Stub kept here so the window's `on_build` return type resolves.
 """
 
-from .canvas import SkiaCanvasBase, ThorCanvasBase
+from .canvas import SkiaCanvasBase, ThorCanvasBase, PixelBufferCanvasBase, PyBufferCanvasBase
 
-type CanvasBase = ThorCanvasBase | SkiaCanvasBase
+type CanvasBase = ThorCanvasBase | SkiaCanvasBase | PixelBufferCanvasBase | PyBufferCanvasBase
 
 class PyWidgetBase:
     """The attachment side of the tree: parenting + child bookkeeping.
