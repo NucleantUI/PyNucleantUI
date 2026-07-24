@@ -107,6 +107,37 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
 
     public var children: [PyWidgetBase] = []
 
+    /// The layout that positions this widget's children — Python assigns one
+    /// of the layout `@PyClass`es (`widget.layout = GridLayout(columns=3)`).
+    /// Stored as the existential; the `layout` `@PyProperty` below is the
+    /// Python round-trip, dispatching on concrete type exactly like `canvas`.
+    /// `nil` means no managed layout — children keep whatever frames they were
+    /// given. Nothing drives the pass automatically yet; call `runLayout()`
+    /// when children or this widget's frame change.
+    private var _layout: (any PyLayoutProtocol)?
+
+    /// The layout slot as Python sees it. Assign a layout `@PyClass` or None
+    /// to clear. Typed `PyPointer` because the macro can't deserialize an
+    /// existential — concrete-type dispatch happens here, same as `canvas`.
+    @PyProperty var layout: PyPointer {
+        get {
+            _layout?.pyPointer() ?? .None
+        }
+        set {
+            if newValue == .None {
+                _layout = nil
+                return
+            }
+            _layout = switch newValue {
+            case VerticalLayout.PyType:   try? VerticalLayout.casted(unsafe: newValue)
+            case HorizontalLayout.PyType: try? HorizontalLayout.casted(unsafe: newValue)
+            case VerticalGrid.PyType:     try? VerticalGrid.casted(unsafe: newValue)
+            case HorizontalGrid.PyType:   try? HorizontalGrid.casted(unsafe: newValue)
+            default: nil
+            }
+        }
+    }
+
     weak var parent: PyWidgetBase?
 
     //private weak var engine: VulkanRenderEngine?
@@ -157,6 +188,19 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
         //     width:   size.width,
         //     height:  size.height
         // )
+    }
+
+    /// Position `children` with `layout`, if one is set: this widget's frame
+    /// is the container, each child hands in its frame. Frames are mutated in
+    /// place, so an observing canvas reacts. No-op without a layout. Call it
+    /// when children are added/removed or this widget's frame changes — the
+    /// pass isn't driven automatically.
+    public func runLayout() {
+        guard let activeLayout = _layout, let container = frame else { return }
+        _ = activeLayout.applyFrames(
+            container: container,
+            children: children.map { $0.frame }
+        )
     }
 
     func on_render(dt: Double) {

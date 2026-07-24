@@ -27,12 +27,34 @@ public enum Orientation: Sendable {
     }
 }
 
-/// Cross-axis placement of children that keep their own (smaller) size.
-/// Frameless children fill the cross axis, so alignment never moves them.
-public enum StackAlignment: Sendable {
+/// Cross-axis placement within a `VerticalLayout` — where a child narrower
+/// than the container sits along the horizontal axis. `Int`-backed (0/1/2)
+/// so it crosses to Python as a raw value; the layout `@PyClass`es take it
+/// that way in their `__init__`.
+public enum HorizontalAlignment: Int, Sendable {
     case leading
     case center
     case trailing
+}
+
+/// Cross-axis placement within a `HorizontalLayout` — where a child shorter
+/// than the container sits along the vertical axis. Same raw values as
+/// `HorizontalAlignment` (start = 0, center = 1, end = 2).
+public enum VerticalAlignment: Int, Sendable {
+    case top
+    case center
+    case bottom
+}
+
+/// How one grid track sizes itself — modelled on SwiftUI's `GridItem.Size`.
+/// `Int`-backed (0/1/2) so it crosses to Python as a raw value.
+public enum GridSize: Int, Sendable {
+    /// An exact extent — `GridItem.minimum` is the size.
+    case fixed
+    /// A share of the leftover length, clamped to `[minimum, maximum]`.
+    case flexible
+    /// As many `[minimum, maximum]`-sized cells as fit in one flexible slot.
+    case adaptive
 }
 
 extension SIMD2 where Scalar == Double {
@@ -56,6 +78,21 @@ extension SIMD2 where Scalar == Double {
 
 public enum LayoutSystem {
 
+    /// Whether a child has no fixed extent on `axis` — `nil` (flexible on
+    /// both axes) or a frame flagging that axis (`flexibleWidth` /
+    /// `flexibleHeight`). Shared by every layout so "flexible == the layout
+    /// supplies the size here" reads the same way for stacks and grids.
+    static func isFlexible<Frame: FrameProtocol>(
+        _ child: Frame?,
+        along axis: Orientation
+    ) -> Bool {
+        guard let child else { return true }
+        switch axis {
+        case .horizontal: return child.flexibleWidth
+        case .vertical: return child.flexibleHeight
+        }
+    }
+
     /// Stack layout over plain frames, in the container's coordinate space
     /// (children start at `container.pos`, i.e. absolute when the container
     /// frame is absolute).
@@ -77,28 +114,17 @@ public enum LayoutSystem {
         children: [Frame?],
         orientation: Orientation,
         spacing: Double = 0,
-        alignment: StackAlignment = .leading
+        crossAlignment: Int = 0
     ) -> [SIMD4<Double>] {
         let cross = orientation.perpendicular
 
-        // A `nil` child is flexible on both axes; a present child is flexible
-        // only where its frame flags say so. Flexible == "no fixed extent
-        // here", i.e. the layout supplies the size on that axis.
-        func flexible(_ child: Frame?, along axis: Orientation) -> Bool {
-            guard let child else { return true }
-            switch axis {
-            case .horizontal: return child.flexibleWidth
-            case .vertical: return child.flexibleHeight
-            }
-        }
-
         let totalSpacing = spacing * Double(max(children.count - 1, 0))
         let fixedLength = children.reduce(0.0) { total, child in
-            flexible(child, along: orientation)
+            isFlexible(child, along: orientation)
                 ? total
                 : total + (child?.size[component: orientation] ?? 0)
         }
-        let flexibleCount = children.filter { flexible($0, along: orientation) }.count
+        let flexibleCount = children.filter { isFlexible($0, along: orientation) }.count
         let leftover = max(
             container.size[component: orientation] - fixedLength - totalSpacing,
             0
@@ -111,19 +137,16 @@ public enum LayoutSystem {
         var offset = container.pos[component: orientation]
         for child in children {
             var size = SIMD2<Double>.zero
-            size[component: orientation] = flexible(child, along: orientation)
+            size[component: orientation] = isFlexible(child, along: orientation)
                 ? flexibleLength
                 : (child?.size[component: orientation] ?? 0)
-            size[component: cross] = flexible(child, along: cross)
+            size[component: cross] = isFlexible(child, along: cross)
                 ? container.size[component: cross]
                 : (child?.size[component: cross] ?? 0)
 
             let slack = container.size[component: cross] - size[component: cross]
-            let crossOffset: Double = switch alignment {
-            case .leading: 0
-            case .center: slack / 2
-            case .trailing: slack
-            }
+            // rawValue 0/1/2 → start / center / end: 0, slack/2, slack.
+            let crossOffset = slack * Double(crossAlignment) / 2
 
             var pos = SIMD2<Double>.zero
             pos[component: orientation] = offset
@@ -131,6 +154,98 @@ public enum LayoutSystem {
 
             frames.append(SIMD4(pos.x, pos.y, size.x, size.y))
             offset += size[component: orientation] + spacing
+        }
+
+        return frames
+    }
+
+    /// Grid pass driven by per-track `GridItem`s (SwiftUI's LazyV/HGrid).
+    /// `tracks` describe the cross-axis lanes — columns when the growth
+    /// `orientation` is `.vertical`, rows when `.horizontal`; children flow
+    /// across the tracks and wrap into a new line along the growth axis.
+    /// `lineSpacing` gaps the wrapped lines; each track's own `spacing` gaps
+    /// it from the next track.
+    ///
+    /// Track sizing along the cross axis: `.fixed` takes its `minimum`;
+    /// `.flexible` (and, for now, `.adaptive`) split the leftover cross length,
+    /// each clamped to its `[minimum, maximum]`. Lines split the growth-axis
+    /// length evenly. Per cell, a child flexible on an axis fills the cell
+    /// there; a fixed axis keeps the child's own extent, aligned by
+    /// `alignment` (0/1/2). Returns one frame per child, in child order.
+    public static func computeGridFrames<Frame: FrameProtocol>(
+        container: Frame,
+        children: [Frame?],
+        tracks: [GridItem],
+        orientation: Orientation,
+        lineSpacing: Double = 0,
+        alignment: Int = 0
+    ) -> [SIMD4<Double>] {
+        let count = children.count
+        guard count > 0, !tracks.isEmpty else { return [] }
+
+        let cross = orientation.perpendicular
+        let trackCount = tracks.count
+
+        // --- Resolve track extents along the cross axis ------------------
+        // Gap after each track but the last (GridItem.spacing; < 0 = none).
+        let gaps: [Double] = (0..<trackCount).map { i in
+            i == trackCount - 1 ? 0 : max(tracks[i].spacing, 0)
+        }
+        let crossAvail = max(container.size[component: cross] - gaps.reduce(0, +), 0)
+
+        let fixedSum = tracks.reduce(0.0) { $0 + ($1.sizing == .fixed ? $1.minimum : 0) }
+        let flexCount = tracks.filter { $0.sizing != .fixed }.count
+        let perFlex = flexCount > 0 ? max(crossAvail - fixedSum, 0) / Double(flexCount) : 0
+
+        var trackExtent = [Double](repeating: 0, count: trackCount)
+        var trackOffset = [Double](repeating: 0, count: trackCount)
+        var run = container.pos[component: cross]
+        for (i, t) in tracks.enumerated() {
+            let extent = t.sizing == .fixed
+                ? t.minimum
+                : min(max(perFlex, t.minimum), t.maximum)
+            trackExtent[i] = max(extent, 0)
+            trackOffset[i] = run
+            run += trackExtent[i] + gaps[i]
+        }
+
+        // --- Lines along the growth axis, split evenly -------------------
+        let lineCount = (count + trackCount - 1) / trackCount
+        let mainAvail = max(
+            container.size[component: orientation] - lineSpacing * Double(lineCount - 1),
+            0
+        )
+        let lineExtent = lineCount > 0 ? mainAvail / Double(lineCount) : 0
+
+        var frames: [SIMD4<Double>] = []
+        frames.reserveCapacity(count)
+
+        for (i, child) in children.enumerated() {
+            let trackIdx = i % trackCount
+            let lineIdx = i / trackCount
+
+            var cellSize = SIMD2<Double>.zero
+            cellSize[component: cross] = trackExtent[trackIdx]
+            cellSize[component: orientation] = lineExtent
+
+            var cellPos = SIMD2<Double>.zero
+            cellPos[component: cross] = trackOffset[trackIdx]
+            cellPos[component: orientation] =
+                container.pos[component: orientation]
+                + Double(lineIdx) * (lineExtent + lineSpacing)
+
+            // Flexible axis → fill the cell; fixed axis → keep the child size.
+            let proposal = ProposedViewSize(
+                isFlexible(child, along: .horizontal) ? cellSize.x : nil,
+                isFlexible(child, along: .vertical) ? cellSize.y : nil
+            )
+            let size = proposal.replacingUnspecifiedDimensions(by: child?.size ?? .zero)
+
+            // rawValue 0/1/2 → start / center / end within the cell.
+            let x = cellPos.x + (cellSize.x - size.x) * Double(alignment) / 2
+            let y = cellPos.y + (cellSize.y - size.y) * Double(alignment) / 2
+
+            frames.append(SIMD4(x, y, size.x, size.y))
         }
 
         return frames

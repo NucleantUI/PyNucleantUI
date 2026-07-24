@@ -18,7 +18,7 @@ import Platform_MacOS
 
 extension PyNucleantUI_Package {
     
-    @PyModule(name: "nucleant.window")
+    @PyModule(name: "_nucleant.window")
     struct Window: PyModuleProtocol {
         
         static let py_classes: [any (PyClassProtocol & AnyObject).Type] = [
@@ -134,8 +134,21 @@ final class WindowBase: NucleantWindow, PyDeserialize {
         rootWidget?.on_render(dt: dt)
         renderEngine?.drawFrame(dt)
     }
-    
-    
+
+    /// Window content resized to `w × h` (native side — not a Python hook).
+    /// Adopt the new size and hand it to the root widget: its frame is the
+    /// layout container size, and setting it drives the root canvas's
+    /// render-node resize through the widget's `frame` setter. The engine
+    /// recreates its swapchain from the layer's drawable size on the next
+    /// `drawFrame`, so we don't touch the swapchain here.
+    func on_size(w: Double, h: Double) {
+        win_rect.z = Int(w)
+        win_rect.w = Int(h)
+        // Root fills the window: a fixed frame at the origin, the new size.
+        rootWidget?.frame = NucleantFrame(pos: .zero, size: .init(w, h))
+    }
+
+
 }
 
 extension WindowBase {

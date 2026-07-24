@@ -8,12 +8,12 @@ import PySwiftWrapper
 //import NucleantVulkan
 //import SulphurApplication
 
-@PyModule(name: "nucleant")
+@PyModule(name: "_nucleant")
 public struct PyNucleantUI_Package: PyModuleProtocol {
-    
+
     public static let modules: [any (PyModuleProtocol).Type] = [
-        
-        //Layout.self,
+
+        Layout.self,
         //UIX.self,
         AppModule.self,
         Canvas.self,

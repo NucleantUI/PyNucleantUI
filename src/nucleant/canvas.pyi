@@ -1,9 +1,5 @@
 """nucleant.canvas — ThorCanvasBase, SkiaCanvasBase, PixelBufferCanvasBase,
-PyBufferCanvasBase, CanvasShader (`@PyClass`).
-
-NOTE: not yet registered in `PyNucleantUI_Package.modules` / any active
-`py_classes`; the classes are defined and annotated but the module wiring is
-pending.
+PyBufferCanvasBase, CanvasShader.
 """
 
 from collections.abc import Buffer
@@ -18,16 +14,15 @@ class CanvasShader:
     full compute shader.
     """
 
-    # `@PyProperty`
     id: int
-    # `@PyProperty` — reassign to recompile/reinstall the post pass.
+    # reassign to recompile/reinstall the post pass.
     frag_code: str | None
 
     def __init__(self, frag_code: str | None) -> None: ...
 
 
 class ThorCanvasBase:
-    """A widget's ThorVG-drawn 2D canvas (`@PyClass`).
+    """A widget's ThorVG-drawn 2D canvas.
 
     Override `on_canvas` (first draw) and `update_canvas` (per frame). Draw
     with ThorVG via the `Tvg_Canvas` capsule from `tvg_canvas_capsule()`.
@@ -35,7 +30,7 @@ class ThorCanvasBase:
 
     def __init__(self) -> None: ...
 
-    # Optional override hooks (`@PyCall`) — the canvas calls them only if
+    # Optional override hooks — the canvas calls them only if
     # the subclass defines them (guarded), so they stay concrete, not abstract.
     def on_canvas(self) -> None: ...
     def update_canvas(self, dt: float) -> None: ...
@@ -54,7 +49,7 @@ class ThorCanvasBase:
 
 
 class PixelBufferCanvasBase:
-    """A widget's CPU-fed, fixed-resolution pixel canvas (`@PyClass`).
+    """A widget's CPU-fed, fixed-resolution pixel canvas.
 
     Some producer fills `width`×`height` RGBA8 pixels every frame; the
     composite pass scales the image to the window (`scale` is an integer
@@ -66,7 +61,7 @@ class PixelBufferCanvasBase:
         """Fixed content resolution (`width`×`height`) and integer up-scale."""
         ...
 
-    # Optional override hooks (`@PyCall`) — the canvas calls them only if
+    # Optional override hooks — the canvas calls them only if
     # the subclass defines them (guarded), so they stay concrete, not abstract.
     def on_canvas(self) -> None: ...
     def update_canvas(self, dt: float) -> None: ...
@@ -89,7 +84,7 @@ class PixelBufferCanvasBase:
 
 
 class PyBufferCanvasBase:
-    """A widget's buffer-protocol-fed, fixed-resolution pixel canvas (`@PyClass`).
+    """A widget's buffer-protocol-fed, fixed-resolution pixel canvas.
 
     The sibling of `PixelBufferCanvasBase`, and the difference is the reason
     it exists: `write` reads the producer object *directly* through the
@@ -113,7 +108,7 @@ class PyBufferCanvasBase:
         """Fixed content resolution (`width`x`height`) and integer up-scale."""
         ...
 
-    # Optional override hooks (`@PyCall`) — the canvas calls them only if
+    # Optional override hooks — the canvas calls them only if
     # the subclass defines them (guarded), so they stay concrete, not abstract.
     def on_canvas(self) -> None: ...
     def update_canvas(self, dt: float) -> None: ...
@@ -138,7 +133,7 @@ class PyBufferCanvasBase:
 
 
 class SkiaCanvasBase:
-    """A widget's Skia-drawn 2D canvas (`@PyClass`).
+    """A widget's Skia-drawn 2D canvas.
 
     Override `on_canvas` / `update_canvas`. Draw with the basic primitives
     here, or — the real path — with skia-python on the raw `SkSurface*` from
@@ -148,7 +143,7 @@ class SkiaCanvasBase:
 
     def __init__(self) -> None: ...
 
-    # Optional override hooks (`@PyCall`) — the canvas calls them only if
+    # Optional override hooks — the canvas calls them only if
     # the subclass defines them (guarded), so they stay concrete, not abstract.
     def on_canvas(self) -> None: ...
     def update_canvas(self, dt: float) -> None: ...

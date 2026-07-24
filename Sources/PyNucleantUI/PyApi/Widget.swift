@@ -11,7 +11,7 @@ import PySwiftWrapper
 
 extension PyNucleantUI_Package {
     
-    @PyModule(name: "nucleant.widget")
+    @PyModule(name: "_nucleant.widget")
     struct Widget: PyModuleProtocol {
         
         static let py_classes: [any (PyClassProtocol & AnyObject).Type] = [

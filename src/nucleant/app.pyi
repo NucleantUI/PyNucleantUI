@@ -1,15 +1,14 @@
-"""nucleant.app — `@PyModule(name: "nucleant.app")`, py_classes: [App]."""
+"""nucleant.app — the application object."""
 
 from abc import ABC, abstractmethod
 
 
 class App(ABC):
-    """The application object (`@PyClass(name: "App")`, PyApp).
+    """The application object .
 
     Owns the process: creates the platform app delegate, initialises the
     ThorVG engine, registers windows by name, and runs the main loop.
-    Subclass it and implement `on_start` (called unconditionally via
-    `@PyCallMethod`).
+    Subclass it and implement `on_start` (called unconditionally).
     """
 
     def __init__(self, threads: int) -> None:
@@ -28,7 +27,7 @@ class App(ABC):
         """Present the window previously registered under `name`."""
         ...
 
-    # Override hook (`@PyCallMethod`) — abstract; the Swift side calls this
+    # Override hook — abstract; the Swift side calls this
     # on your subclass after startup. Implement it to build initial state.
     @abstractmethod
     def on_start(self) -> None: ...

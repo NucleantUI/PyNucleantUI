@@ -3,7 +3,7 @@
 
 import PackageDescription
 
-let nucleantDev = false
+let nucleantDev = true
 let pskDev = false
 
 func getDependencies() -> [Package.Dependency] {

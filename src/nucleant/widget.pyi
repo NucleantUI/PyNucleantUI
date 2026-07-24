@@ -1,13 +1,12 @@
-"""nucleant.widget — PyWidgetBase (`@PyClass`).
-
-NOTE: not yet registered in `PyNucleantUI_Package.modules` / any active
-`py_classes`; the class is defined and annotated but the module wiring is
-pending. Stub kept here so the window's `on_build` return type resolves.
+"""nucleant.widget — PyWidgetBase, the widget-tree node (also the
+`on_build` return type).
 """
 
 from .canvas import SkiaCanvasBase, ThorCanvasBase, PixelBufferCanvasBase, PyBufferCanvasBase
+from .layout import VerticalLayout, HorizontalLayout, VerticalGrid, HorizontalGrid
 
 type CanvasBase = ThorCanvasBase | SkiaCanvasBase | PixelBufferCanvasBase | PyBufferCanvasBase
+type Layout = VerticalLayout | HorizontalLayout | VerticalGrid | HorizontalGrid
 
 class PyWidgetBase:
     """The attachment side of the tree: parenting + child bookkeeping.
@@ -17,10 +16,15 @@ class PyWidgetBase:
     canvas's business. Assign no canvas and the widget is a pure container.
     """
 
-    # `@PyProperty` — the widget's canvas slot; assign a canvas or None.
+    # the widget's canvas slot; assign a canvas or None.
     canvas: CanvasBase | None
 
-    # `@PyProperty` — stable identity (defaults to a UUID hash).
+    # layout that positions this widget's children; assign a
+    # VStack/HStack/GridLayout or None. The pass runs over the children's
+    # frames within this widget's frame.
+    layout: Layout | None
+
+    # stable identity (defaults to a UUID hash).
     id: int
 
     def __init__(self) -> None: ...

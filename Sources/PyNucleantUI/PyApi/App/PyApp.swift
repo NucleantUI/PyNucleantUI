@@ -87,7 +87,7 @@ extension PyApp {
 }
 
 extension PyNucleantUI_Package {
-    @PyModule(name: "nucleant.app")
+    @PyModule(name: "_nucleant.app")
     struct AppModule: PyModuleProtocol {
         
         static let py_classes: [any (PyClassProtocol & AnyObject).Type] = [

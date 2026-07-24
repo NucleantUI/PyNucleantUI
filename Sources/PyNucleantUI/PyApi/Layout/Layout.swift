@@ -17,11 +17,16 @@ import PySwiftWrapper
 
 extension PyNucleantUI_Package {
     
-    @PyModule(name: "nucleant.layout")
+    @PyModule(name: "_nucleant.layout")
     struct Layout: PyModuleProtocol {
         
         static let py_classes: [any (PyClassProtocol & AnyObject).Type] = [
-            NucleantFrame.self
+            NucleantFrame.self,
+            VerticalLayout.self,
+            HorizontalLayout.self,
+            VerticalGrid.self,
+            HorizontalGrid.self,
+            GridItem.self
         ]
         
     

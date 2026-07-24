@@ -1,4 +1,4 @@
-"""nucleant.window — `@PyModule(name: "nucleant.window")`, py_classes: [WindowBase]."""
+"""nucleant.window — WindowBase, the platform window."""
 
 from abc import ABC, abstractmethod
 
@@ -6,10 +6,10 @@ from .widget import PyWidgetBase
 
 
 class WindowBase(ABC):
-    """A platform window bound to a Vulkan render engine (`@PyClass`, WindowBase).
+    """A platform window bound to a Vulkan render engine .
 
     Subclass it and implement the `on_*` hooks. The native side calls each
-    hook directly (`@PyCallMethod`, unguarded), so they are abstract — a
+    hook directly (unguarded), so they are abstract — a
     subclass must provide them: `on_build` returns the root widget tree,
     `on_frame` advances per-tick state, and the input hooks receive
     mouse/scroll/key events.
@@ -23,7 +23,7 @@ class WindowBase(ABC):
         """Create the platform window + engine and show it."""
         ...
 
-    # Override hooks (`@PyCallMethod`) — abstract; implement in your subclass.
+    # Override hooks — abstract; implement in your subclass.
 
     @abstractmethod
     def on_build(self) -> PyWidgetBase | None:
