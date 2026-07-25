@@ -41,6 +41,7 @@ final class WindowBase: NucleantWindow, PyDeserialize {
     
     
     private let _on_build:             PyPointer = "on_build"
+    private let _py_on_size:           PyPointer = "on_size"
     private let _on_frame:             PyPointer = "on_frame"
     private let _on_mouse_down:        PyPointer = "on_mouse_down"
     private let _on_mouse_up:          PyPointer = "on_mouse_up"
@@ -73,6 +74,7 @@ final class WindowBase: NucleantWindow, PyDeserialize {
     
     deinit {
         _on_build.decRef()
+        _py_on_size.decRef()
         _on_mouse_down.decRef()
         _on_mouse_up.decRef()
         _on_mouse_dragged.decRef()
@@ -115,6 +117,15 @@ final class WindowBase: NucleantWindow, PyDeserialize {
         //    never name a canvas kind here.
         let root = try on_build()
         rootWidget = root
+        if let root = root {
+            if let frame = root.frame {
+                frame.size = .init(Double(win_rect.z), Double(win_rect.w))
+            } else {
+                root.frame = .init(pos: .zero, size: .init(Double(win_rect.z), Double(win_rect.w)))
+            }
+            // Root now carries the window size — lay its subtree out before bind.
+            root.runLayout()
+        }
         if let root {
             RenderBinder.bind(tree: root, into: engine, width: win_rect.z, height: win_rect.w)
         }
@@ -144,8 +155,14 @@ final class WindowBase: NucleantWindow, PyDeserialize {
     func on_size(w: Double, h: Double) {
         win_rect.z = Int(w)
         win_rect.w = Int(h)
+        py_on_size(w: w, h: h)
         // Root fills the window: a fixed frame at the origin, the new size.
-        rootWidget?.frame = NucleantFrame(pos: .zero, size: .init(w, h))
+        guard let rootWidget else { return }
+        if let frame = rootWidget.frame {
+            frame.size = .init(w, h)
+        } else {
+            rootWidget.frame = NucleantFrame(pos: .zero, size: .init(w, h))
+        }
     }
 
 
@@ -155,6 +172,7 @@ extension WindowBase {
     
     @PyCallMethod(path: \Self.__self__) func on_build() throws -> PyWidgetBase?
     @PyCallMethod(path: \Self.__self__) func on_frame(dt: Double)
+    @PyCallMethod(path: \Self.__self__) func py_on_size(w: Double, h: Double)
     @PyCallMethod(path: \Self.__self__) func on_mouse_down(x: Double, y: Double)
     @PyCallMethod(path: \Self.__self__) func on_mouse_up(x: Double, y: Double)
     @PyCallMethod(path: \Self.__self__) func on_mouse_dragged(x: Double, y: Double)

@@ -97,49 +97,39 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
     /// the old node's image. Before `attach` this is a no-op: `attach`
     /// sizes the fresh node from the frame itself.
     private func rebuildNode(width: Int, height: Int) {
-        // guard let engine, let wgpu, let oldNode = node else { return }
-        // guard width > 0, height > 0,
-        //       oldNode.width != UInt32(width) || oldNode.height != UInt32(height)
-        // else { return }
+        guard let engine, let oldNode = node, width > 0, height > 0,
+              oldNode.width != UInt32(width) || oldNode.height != UInt32(height)
+        else { return }
 
-        // // Build first — on failure the old node stays live and keeps
-        // // drawing at the old size instead of the widget going dark.
-        // guard let built = engine.makeWidgetNode(
-        //     wgpu:     wgpu,
-        //     width:    width,
-        //     height:   height,
-        //     adopting: base
-        // ) else {
-        //     print("PySulphurCanvasBase: node rebuild at \(width)x\(height) failed, keeping old size")
-        //     return
-        // }
+        // Build first — adopting `base` keeps ThorVG's paints and any
+        // Python-held capsules valid — so a failure leaves the old node
+        // drawing at the old size instead of the widget going dark. All wgpu
+        // stays inside the engine/ThorVG; the new node frees its own target
+        // (`releaseExternal`) when its VkImage goes.
+        guard let built = engine.makeThorWidgetNode(adopting: base, width: width, height: height) else {
+            fputs("ThorCanvasBase: node rebuild at \(width)x\(height) failed, keeping old size\n", stderr)
+            return
+        }
 
-        // // The shader object survives, but its pipeline points at the old
-        // // node's image — take it down (drains the GPU with it) before the
-        // // old node leaves the composite.
-        // postShader?.detach()
-        // // engine.replace(oldNode, with: built.node)
-        // // ^ slots are id-keyed now: same canvas id, new node in the same
-        // //   z-position.
-        // engine.replace(id: id, with: .thor(built.node))
+        // The post shader's pipeline points at the old node's image — take it
+        // down before that node leaves the composite.
+        postShader?.detach()
 
-        // // makeWidgetNode retargeted `base` at the new texture, so the old
-        // // texture and the old node's Vulkan image are only ours now.
-        // engine.destroyResources(of: oldNode)
-        // if let thorTexture {
-        //     wgpu.release(texture: thorTexture)
-        // }
-        // node        = built.node
-        // thorTexture = built.texture
+        // Same-id swap: keeps z-order and frees the old node's image
+        // (`replace` destroys it). Re-hand the widget frame to the fresh slot
+        // so the composite keeps positioning it.
+        engine.replace(id: id, with: .thor(built))
+        engine.node(withId: id)?.frame = _frame
+        node = built
 
-        // if let postShader {
-        //     do {
-        //         try postShader.attach(engine: engine, node: built.node)
-        //     } catch {
-        //         print("PySulphurCanvasBase: post shader reinstall after resize failed: \(error)")
-        //     }
-        // }
-        // markDirty()
+        if let postShader {
+            do {
+                try postShader.attach(engine: engine, node: built)
+            } catch {
+                fputs("ThorCanvasBase: post shader reinstall after resize failed: \(error)\n", stderr)
+            }
+        }
+        markDirty()
     }
 
 

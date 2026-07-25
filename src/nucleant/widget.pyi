@@ -3,7 +3,7 @@
 """
 
 from .canvas import SkiaCanvasBase, ThorCanvasBase, PixelBufferCanvasBase, PyBufferCanvasBase
-from .layout import VerticalLayout, HorizontalLayout, VerticalGrid, HorizontalGrid
+from .layout import NucleantFrame, VerticalLayout, HorizontalLayout, VerticalGrid, HorizontalGrid
 
 type CanvasBase = ThorCanvasBase | SkiaCanvasBase | PixelBufferCanvasBase | PyBufferCanvasBase
 type Layout = VerticalLayout | HorizontalLayout | VerticalGrid | HorizontalGrid
@@ -15,6 +15,9 @@ class PyWidgetBase:
     `ThorCanvasBase` or `SkiaCanvasBase`) and drawing is entirely the
     canvas's business. Assign no canvas and the widget is a pure container.
     """
+
+    # the widget's frame — position + size; assign a NucleantFrame or None.
+    frame: NucleantFrame | None
 
     # the widget's canvas slot; assign a canvas or None.
     canvas: CanvasBase | None

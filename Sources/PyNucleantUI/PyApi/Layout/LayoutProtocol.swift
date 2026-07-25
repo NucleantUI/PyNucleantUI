@@ -96,10 +96,10 @@ public final class VerticalLayout: StackLayoutProtocol, PyLayoutProtocol {
     public var crossAlignment: Int { alignment.rawValue }
 
     @PyInit
-    init(__self__: PyPointer, spacing: Double = 0, alignment: Int = 0) {
+    init(__self__: PyPointer, spacing: Double = 0, alignment: HorizontalAlignment = .leading) {
         self.__self__ = __self__
         self.spacing = spacing
-        self.alignment = HorizontalAlignment(rawValue: alignment) ?? .leading
+        self.alignment = alignment
     }
 
     public func pyPointer() -> PyPointer { __self__.newRef }
@@ -119,10 +119,10 @@ public final class HorizontalLayout: StackLayoutProtocol, PyLayoutProtocol {
     public var crossAlignment: Int { alignment.rawValue }
 
     @PyInit
-    init(__self__: PyPointer, spacing: Double = 0, alignment: Int = 0) {
+    init(__self__: PyPointer, spacing: Double = 0, alignment: VerticalAlignment = .top) {
         self.__self__ = __self__
         self.spacing = spacing
-        self.alignment = VerticalAlignment(rawValue: alignment) ?? .top
+        self.alignment = alignment
     }
 
     public func pyPointer() -> PyPointer { __self__.newRef }
@@ -182,12 +182,12 @@ public final class VerticalGrid: GridLayout, PyLayoutProtocol {
         __self__: PyPointer,
         columns: [GridItem],
         spacing: Double = 0,
-        alignment: Int = 0
+        alignment: HorizontalAlignment = .leading
     ) {
         self.__self__ = __self__
         self.columns = columns
         self.spacing = spacing
-        self.alignment = HorizontalAlignment(rawValue: alignment) ?? .leading
+        self.alignment = alignment
     }
 
     public func pyPointer() -> PyPointer { __self__.newRef }
@@ -213,12 +213,12 @@ public final class HorizontalGrid: GridLayout, PyLayoutProtocol {
         __self__: PyPointer,
         rows: [GridItem],
         spacing: Double = 0,
-        alignment: Int = 0
+        alignment: VerticalAlignment = .top
     ) {
         self.__self__ = __self__
         self.rows = rows
         self.spacing = spacing
-        self.alignment = VerticalAlignment(rawValue: alignment) ?? .top
+        self.alignment = alignment
     }
 
     public func pyPointer() -> PyPointer { __self__.newRef }
@@ -232,8 +232,8 @@ public final class HorizontalGrid: GridLayout, PyLayoutProtocol {
 /// extent. Defaults mirror SwiftUI's `.flexible()`.
 @PyClass
 public final class GridItem: PyDeserialize {
-    /// Sizing mode as a `GridSize` raw value (0 fixed / 1 flexible / 2 adaptive).
-    @PyProperty public var kind: Int
+    /// Sizing mode.
+    @PyProperty public var kind: GridSize
     /// Lower bound, or the exact extent when `kind == fixed`.
     @PyProperty public var minimum: Double
     /// Upper bound (`inf` = unbounded); ignored when `kind == fixed`.
@@ -241,12 +241,12 @@ public final class GridItem: PyDeserialize {
     /// Gap after this track; negative means "use the grid's default".
     @PyProperty public var spacing: Double
 
-    /// The sizing mode as a typed value for Swift consumers.
-    public var sizing: GridSize { GridSize(rawValue: kind) ?? .flexible }
+    /// The sizing mode (alias of `kind`) for Swift consumers.
+    public var sizing: GridSize { kind }
 
     @PyInit
     init(
-        kind: Int = 1,
+        kind: GridSize = .flexible,
         minimum: Double = 10,
         maximum: Double = .infinity,
         spacing: Double = -1

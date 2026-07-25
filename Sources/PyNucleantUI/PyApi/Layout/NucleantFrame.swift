@@ -23,7 +23,7 @@ import Observation
 /// the whole frame object still goes through the widget's `frame` setter.
 @Observable
 @PyClass
-public final class NucleantFrame: FrameProtocol {
+public final class NucleantFrame: FrameProtocol, PySerialize, PyDeserialize {
     
     
     @PyProperty
@@ -37,6 +37,12 @@ public final class NucleantFrame: FrameProtocol {
 
     @PyProperty
     public var flexible_height: Bool = false
+
+    @PyProperty
+    public var x: Double {
+        get { pos.x }
+        set { pos.x = newValue }
+    }
 
     /// Bridge the Python-facing snake_case flags onto `FrameProtocol`, so the
     /// layout maths read flexibility the same way for every frame type.
@@ -65,6 +71,10 @@ public final class NucleantFrame: FrameProtocol {
         self.init(pos: pos, size: size)
         flexible_width = true
         flexible_height = true
+    }
+    
+    public func pyPointer() -> PyPointer {
+        Self.asPyPointer(unretained: self)
     }
 }
 

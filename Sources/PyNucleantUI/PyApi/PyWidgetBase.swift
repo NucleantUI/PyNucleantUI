@@ -55,6 +55,7 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
     /// `frame = None` from Python resets it back to flexible.
     private var _frame: NucleantFrame = NucleantFrame(flexible: .zero)
 
+    @PyProperty
     public var frame: NucleantFrame? {
         get { _frame }
         set {
@@ -62,6 +63,8 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
             // On a live node canvas, handing the (possibly just-reset) frame
             // down is what triggers the render-node resize.
             _canvas?.frame = frame
+            // Container size changed → re-place children under any layout.
+            runLayout()
         }
     }
 
@@ -126,15 +129,17 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
         set {
             if newValue == .None {
                 _layout = nil
-                return
+            } else {
+                _layout = switch newValue {
+                case VerticalLayout.PyType:   try? VerticalLayout.casted(unsafe: newValue)
+                case HorizontalLayout.PyType: try? HorizontalLayout.casted(unsafe: newValue)
+                case VerticalGrid.PyType:     try? VerticalGrid.casted(unsafe: newValue)
+                case HorizontalGrid.PyType:   try? HorizontalGrid.casted(unsafe: newValue)
+                default: nil
+                }
             }
-            _layout = switch newValue {
-            case VerticalLayout.PyType:   try? VerticalLayout.casted(unsafe: newValue)
-            case HorizontalLayout.PyType: try? HorizontalLayout.casted(unsafe: newValue)
-            case VerticalGrid.PyType:     try? VerticalGrid.casted(unsafe: newValue)
-            case HorizontalGrid.PyType:   try? HorizontalGrid.casted(unsafe: newValue)
-            default: nil
-            }
+            // Layout (re)assigned → place existing children with it.
+            runLayout()
         }
     }
 
@@ -275,6 +280,8 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
         let child: PyWidgetBase = try .casted(from: widget)
         child.parent = self
         children.append(child)
+        // A new child changed the set the layout places.
+        runLayout()
         // find better way that doesnt envolve stored engine or webgpu
         // we should never need to ref to this again on this side, belong in render
         // make this smarter
@@ -297,6 +304,7 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
         let wid: PyWidgetBase = try .casted(from: widget)
         children.removeAll { $0.id == wid.id }
         wid.detachTree()
+        runLayout()
     }
 
     @PyMethod()
