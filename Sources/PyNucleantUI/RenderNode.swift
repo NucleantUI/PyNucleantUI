@@ -19,7 +19,17 @@ public final class RenderNode: RenderContainerNode, @unchecked Sendable {
     public let context: Context
     
     public var needsRender: Bool = true
-    
+
+    /// The owning widget's frame. The composite reads it live every frame, so
+    /// a layout change (position or size) repositions the slot with no rebind.
+    public weak var frame: NucleantFrame?
+
+    /// Where this slot composites — the live widget frame (x, y, w, h);
+    /// nil fills the window.
+    public var compositeRect: SIMD4<Double>? {
+        frame.map { SIMD4($0.pos.x, $0.pos.y, $0.size.x, $0.size.y) }
+    }
+
     public init(id: Int, context: Context) {
         self.context = context
         self.id = id
@@ -129,8 +139,11 @@ public enum RenderBinder {
     private static func bindSlot(for canvas: any PyCanvasBase, into engine: RenderEngine, width: Int, height: Int) {
         // A frame set on the canvas wins over the window size; without one the
         // canvas fills the window.
-        let w = canvas.frame.map { Int($0.size.x) } ?? width
-        let h = canvas.frame.map { Int($0.size.y) } ?? height
+        let size = canvas.frame?.size ?? .zero
+        let w = size.x != 0 ? Int(size.x) : width
+        let h = size.y != 0 ? Int(size.y) : height
+        //let w = canvas.frame.map { Int($0.size.x) } ?? width
+        //let h = canvas.frame.map { Int($0.size.y) } ?? height
 
         switch canvas {
         case let skia as SkiaCanvasBase:
@@ -142,6 +155,7 @@ public enum RenderBinder {
                 }
                 skia.bind(engine: engine)
                 let slot = RenderNode(id: skia.id, context: .skia(node))
+                slot.frame = canvas.frame
                 slot.observeContext()
                 engine.append(slot)
                 skia.attach(ownNode: node, width: w, height: h)
@@ -160,6 +174,7 @@ public enum RenderBinder {
                 )
                 pixel.bind(engine: engine)
                 let slot = RenderNode(id: pixel.id, context: .pixel_buffer(node))
+                slot.frame = canvas.frame
                 slot.observeContext()
                 engine.append(slot)
                 pixel.attach(ownNode: node, width: pixel.contentWidth, height: pixel.contentHeight)
@@ -179,6 +194,7 @@ public enum RenderBinder {
                 )
                 pyBuffer.bind(engine: engine)
                 let slot = RenderNode(id: pyBuffer.id, context: .py_buffer(node))
+                slot.frame = canvas.frame
                 slot.observeContext()
                 engine.append(slot)
                 pyBuffer.attach(ownNode: node, width: pyBuffer.contentWidth, height: pyBuffer.contentHeight)
@@ -197,6 +213,7 @@ public enum RenderBinder {
             }
             thor.bind(engine: engine)
             let slot = RenderNode(id: thor.id, context: .thor(node))
+            slot.frame = canvas.frame
             slot.observeContext()
             engine.append(slot)
             thor.attach(ownNode: node, width: w, height: h)

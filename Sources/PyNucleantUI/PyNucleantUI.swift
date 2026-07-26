@@ -24,3 +24,18 @@ public struct PyNucleantUI_Package: PyModuleProtocol {
 }
 
 
+extension Int {
+    var asDouble: Double { .init(self) }
+    
+    func scaled(_ scale: Double) -> Double {
+        self.asDouble * scale
+    }
+}
+
+extension Double {
+    var asInt: Int { .init(self) }
+    
+    func scaled(_ scale: Double) -> Double {
+        self * scale
+    }
+}

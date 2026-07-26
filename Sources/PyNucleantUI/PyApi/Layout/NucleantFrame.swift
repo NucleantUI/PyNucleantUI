@@ -22,8 +22,8 @@ import Observation
 /// render node on change (`PySulphurCanvasBase.observeFrame`). Replacing
 /// the whole frame object still goes through the widget's `frame` setter.
 @Observable
-@PyClass
-public final class NucleantFrame: FrameProtocol {
+@PyClass(self_ref: true)
+public final class NucleantFrame: FrameProtocol, PySerialize, PyDeserialize {
     
     
     @PyProperty
@@ -38,10 +38,18 @@ public final class NucleantFrame: FrameProtocol {
     @PyProperty
     public var flexible_height: Bool = false
 
+    @PyProperty
+    public var x: Double {
+        get { pos.x }
+        set { pos.x = newValue }
+    }
+
     /// Bridge the Python-facing snake_case flags onto `FrameProtocol`, so the
     /// layout maths read flexibility the same way for every frame type.
     public var flexibleWidth: Bool { flexible_width }
     public var flexibleHeight: Bool { flexible_height }
+    
+    var __self__: PyPointer?
 
     public init(pos: SIMD2<Double>, size: SIMD2<Double>) {
         self.pos = pos
@@ -49,9 +57,10 @@ public final class NucleantFrame: FrameProtocol {
     }
 
     @PyInit
-    init(x: Double, y: Double, w: Double, h: Double) {
+    init(__self__: PyPointer, x: Double, y: Double, w: Double, h: Double) {
         pos = .init(x, y)
         size = .init(w, h)
+        self.__self__ = __self__
     }
 
     /// The concrete stand-in for a `nil` child: no fixed extent on either
@@ -65,6 +74,10 @@ public final class NucleantFrame: FrameProtocol {
         self.init(pos: pos, size: size)
         flexible_width = true
         flexible_height = true
+    }
+    
+    public func pyPointer() -> PyPointer {
+        __self__?.newRef ?? .None //?? Self.asPyPointer(unretained: self)
     }
 }
 

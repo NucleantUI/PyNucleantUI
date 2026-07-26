@@ -58,10 +58,10 @@ class GridItem:
 
     def __init__(
         self,
-        kind: GridSize = GridSize.FLEXIBLE,
-        minimum: float = 10.0,
-        maximum: float = float("inf"),
-        spacing: float = -1.0,
+        kind: GridSize,
+        minimum: float,
+        maximum: float,
+        spacing: float,
     ) -> None: ...
 
 
@@ -95,8 +95,8 @@ class VerticalLayout:
 
     def __init__(
         self,
-        spacing: float = 0.0,
-        alignment: HorizontalAlignment = HorizontalAlignment.LEADING,
+        spacing: float,
+        alignment: HorizontalAlignment,
     ) -> None: ...
 
 
@@ -111,8 +111,8 @@ class HorizontalLayout:
 
     def __init__(
         self,
-        spacing: float = 0.0,
-        alignment: VerticalAlignment = VerticalAlignment.TOP,
+        spacing: float,
+        alignment: VerticalAlignment,
     ) -> None: ...
 
 
@@ -132,8 +132,8 @@ class VerticalGrid:
     def __init__(
         self,
         columns: list[GridItem],
-        spacing: float = 0.0,
-        alignment: HorizontalAlignment = HorizontalAlignment.LEADING,
+        spacing: float,
+        alignment: HorizontalAlignment,
     ) -> None: ...
 
 
@@ -152,6 +152,6 @@ class HorizontalGrid:
     def __init__(
         self,
         rows: list[GridItem],
-        spacing: float = 0.0,
-        alignment: VerticalAlignment = VerticalAlignment.TOP,
+        spacing: float,
+        alignment: VerticalAlignment,
     ) -> None: ...

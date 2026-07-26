@@ -52,6 +52,8 @@ let package = Package(
         // v14 floor: SulphurFrame is @Observable (Observation framework).
         // If a pre-14 target ever matters, a patched OpenObservation clone
         // is parked at /Volumes/CodeSSD/dev_projects/OpenObservation.
+        // iOS 17 is the same Observation floor on iOS.
+        .iOS(.v17),
         .macOS(.v14)
     ],
     products: [

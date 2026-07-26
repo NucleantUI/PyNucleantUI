@@ -8,7 +8,11 @@
 @preconcurrency import PySerializing
 import PySwiftWrapper
 import NucleantApplication
+#if os(macOS)
 import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
 //import NucleantVulkan
 import NucleantThorVG
 
@@ -38,13 +42,25 @@ final class PyApp: NucleantApplication {
     
     private var _on_start: PyPointer
 
-    #if os(macOS)
+    #if os(macOS) || os(iOS)
     var appDelegate: AppDelegate<PyApp>?
     #endif
-    
+
     @PyMethod()
     func run() {
+        #if os(macOS)
         NSApplication.shared.run()
+        #elseif os(iOS)
+        // The host entry point owns the UIApplication run loop (the ksproject
+        // iOS template boots it, then runs this Python app module which reaches
+        // here). So run() does what macOS's launch callback does: on_start
+        // builds initial state and presents the window(s); each window's
+        // CADisplayLink then drives frames on the already-running loop. (If the
+        // iOS entry is ever changed to a bare Python boot with nothing owning
+        // the loop, run() would call UIApplicationMain here instead — the
+        // direct mirror of NSApplication.run().)
+        onStart()
+        #endif
     }
     
     var registeredWindows: [String:PyPointer] = [:]

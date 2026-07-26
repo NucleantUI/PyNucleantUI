@@ -12,6 +12,8 @@
 
 //import SulphurUI
 import simd
+import PySwiftKit
+import PySerializing
 
 /// The stack axis. Mirrors swift-cross-ui's `Orientation`, which lets one
 /// shared algorithm drive both stack directions via `subscript(component:)`.
@@ -31,7 +33,7 @@ public enum Orientation: Sendable {
 /// than the container sits along the horizontal axis. `Int`-backed (0/1/2)
 /// so it crosses to Python as a raw value; the layout `@PyClass`es take it
 /// that way in their `__init__`.
-public enum HorizontalAlignment: Int, Sendable {
+public enum HorizontalAlignment: Int, Sendable, PySerializable {
     case leading
     case center
     case trailing
@@ -40,7 +42,7 @@ public enum HorizontalAlignment: Int, Sendable {
 /// Cross-axis placement within a `HorizontalLayout` — where a child shorter
 /// than the container sits along the vertical axis. Same raw values as
 /// `HorizontalAlignment` (start = 0, center = 1, end = 2).
-public enum VerticalAlignment: Int, Sendable {
+public enum VerticalAlignment: Int, Sendable, PySerializable {
     case top
     case center
     case bottom
@@ -48,7 +50,7 @@ public enum VerticalAlignment: Int, Sendable {
 
 /// How one grid track sizes itself — modelled on SwiftUI's `GridItem.Size`.
 /// `Int`-backed (0/1/2) so it crosses to Python as a raw value.
-public enum GridSize: Int, Sendable {
+public enum GridSize: Int, Sendable, PySerializable {
     /// An exact extent — `GridItem.minimum` is the size.
     case fixed
     /// A share of the leftover length, clamped to `[minimum, maximum]`.

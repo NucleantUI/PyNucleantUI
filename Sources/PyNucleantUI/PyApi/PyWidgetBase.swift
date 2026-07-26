@@ -53,15 +53,18 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
     /// takes the remaining parent space (SwiftUI's no-frame behaviour)
     /// instead of inheriting the parent's frame as a fixed size. Assigning
     /// `frame = None` from Python resets it back to flexible.
-    private var _frame: NucleantFrame = NucleantFrame(flexible: .zero)
+    private var _frame: NucleantFrame? = NucleantFrame(flexible: .zero)
 
+    @PyProperty
     public var frame: NucleantFrame? {
         get { _frame }
         set {
-            _frame = newValue ?? NucleantFrame(flexible: .zero)
+            _frame = newValue //?? NucleantFrame(flexible: .zero)
             // On a live node canvas, handing the (possibly just-reset) frame
             // down is what triggers the render-node resize.
-            _canvas?.frame = frame
+            _canvas?.frame = newValue
+            // Container size changed → re-place children under any layout.
+            runLayout()
         }
     }
 
@@ -126,15 +129,17 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
         set {
             if newValue == .None {
                 _layout = nil
-                return
+            } else {
+                _layout = switch newValue {
+                case VerticalLayout.PyType:   try? VerticalLayout.casted(unsafe: newValue)
+                case HorizontalLayout.PyType: try? HorizontalLayout.casted(unsafe: newValue)
+                case VerticalGrid.PyType:     try? VerticalGrid.casted(unsafe: newValue)
+                case HorizontalGrid.PyType:   try? HorizontalGrid.casted(unsafe: newValue)
+                default: nil
+                }
             }
-            _layout = switch newValue {
-            case VerticalLayout.PyType:   try? VerticalLayout.casted(unsafe: newValue)
-            case HorizontalLayout.PyType: try? HorizontalLayout.casted(unsafe: newValue)
-            case VerticalGrid.PyType:     try? VerticalGrid.casted(unsafe: newValue)
-            case HorizontalGrid.PyType:   try? HorizontalGrid.casted(unsafe: newValue)
-            default: nil
-            }
+            // Layout (re)assigned → place existing children with it.
+            runLayout()
         }
     }
 
@@ -197,10 +202,12 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
     /// pass isn't driven automatically.
     public func runLayout() {
         guard let activeLayout = _layout, let container = frame else { return }
-        _ = activeLayout.applyFrames(
-            container: container,
-            children: children.map { $0.frame }
-        )
+        // Hand the frames to the layout and let it place them. The layout
+        // keeps them so a later `spacing`/`alignment` change can recompute
+        // on its own — it never calls back here.
+        activeLayout.boundContainer = container
+        activeLayout.boundChildren  = children.map { $0.frame }
+        activeLayout.recompute()
     }
 
     func on_render(dt: Double) {
@@ -275,6 +282,8 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
         let child: PyWidgetBase = try .casted(from: widget)
         child.parent = self
         children.append(child)
+        // A new child changed the set the layout places.
+        runLayout()
         // find better way that doesnt envolve stored engine or webgpu
         // we should never need to ref to this again on this side, belong in render
         // make this smarter
@@ -297,6 +306,7 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
         let wid: PyWidgetBase = try .casted(from: widget)
         children.removeAll { $0.id == wid.id }
         wid.detachTree()
+        runLayout()
     }
 
     @PyMethod()
