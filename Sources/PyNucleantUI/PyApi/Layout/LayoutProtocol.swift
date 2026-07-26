@@ -42,8 +42,10 @@ extension LayoutProtocol {
             guard let child else {
                 return NucleantFrame(pos: frame.pos, size: frame.size)
             }
-            child.pos = frame.pos
-            child.size = frame.size
+            // Only write on real change — a per-frame pass over a static
+            // layout must not churn the frame's observers (canvas rebuild etc.).
+            if child.pos != frame.pos { child.pos = frame.pos }
+            if child.size != frame.size { child.size = frame.size }
             return child
         }
     }
@@ -80,7 +82,28 @@ extension StackLayoutProtocol {
 /// `@PyClass` instance, so a widget can hold `any PyLayoutProtocol`, hand its
 /// Python object back through `widget.layout`, and still run the frame pass.
 /// Mirrors `PyCanvasBase` — the same round-trip a canvas slot does.
-public protocol PyLayoutProtocol: LayoutProtocol, PySerializable, PyClassProtocol, AnyObject {}
+public protocol PyLayoutProtocol: LayoutProtocol, PySerializable, PyClassProtocol, AnyObject {
+    /// The frames this layout positions — held so a property change (`spacing`,
+    /// `alignment`) can re-place them itself. The layout only touches frames,
+    /// never a widget.
+    var boundContainer: NucleantFrame? { get set }
+    var boundChildren:  [NucleantFrame?] { get set }
+}
+
+extension PyLayoutProtocol {
+    /// Re-place the held child frames from the held container — what a changed
+    /// `spacing`/`alignment` calls. Mutating a frame drives its own render via
+    /// the frame's observation; only frames that actually moved are written.
+    public func recompute() {
+        guard let container = boundContainer else { return }
+        let computed = computeFrames(container: container, children: boundChildren)
+        for (child, f) in zip(boundChildren, computed) {
+            guard let child else { continue }
+            if child.pos  != f.pos  { child.pos  = f.pos }
+            if child.size != f.size { child.size = f.size }
+        }
+    }
+}
 
 /// Ready-to-attach vertical stack — `widget.layout = VerticalLayout(spacing=8)`.
 /// Children align across the horizontal axis; `alignment` crosses from Python
@@ -88,11 +111,18 @@ public protocol PyLayoutProtocol: LayoutProtocol, PySerializable, PyClassProtoco
 @PyClass(self_ref: true)
 public final class VerticalLayout: StackLayoutProtocol, PyLayoutProtocol {
     private let __self__: PyPointer
+    public var boundContainer: NucleantFrame?
+    public var boundChildren:  [NucleantFrame?] = []
 
     public var orientation: Orientation { .vertical }
-
-    @PyProperty public var spacing: Double
-    public var alignment: HorizontalAlignment
+    
+    @PyProperty(readonly: false) public var spacing: Double {
+        didSet { if spacing != oldValue { recompute() } }
+        
+    }
+    @PyProperty public var alignment: HorizontalAlignment {
+        didSet { if alignment != oldValue { recompute() } }
+    }
     public var crossAlignment: Int { alignment.rawValue }
 
     @PyInit
@@ -111,11 +141,17 @@ public final class VerticalLayout: StackLayoutProtocol, PyLayoutProtocol {
 @PyClass(self_ref: true)
 public final class HorizontalLayout: StackLayoutProtocol, PyLayoutProtocol {
     private let __self__: PyPointer
+    public var boundContainer: NucleantFrame?
+    public var boundChildren:  [NucleantFrame?] = []
 
     public var orientation: Orientation { .horizontal }
-
-    @PyProperty public var spacing: Double
-    public var alignment: VerticalAlignment
+        
+    @PyProperty public var spacing: Double {
+        didSet { if spacing != oldValue { recompute() } }
+    }
+    @PyProperty public var alignment: VerticalAlignment {
+        didSet { if alignment != oldValue { recompute() } }
+    }
     public var crossAlignment: Int { alignment.rawValue }
 
     @PyInit
@@ -167,10 +203,16 @@ extension GridLayout {
 @PyClass(self_ref: true)
 public final class VerticalGrid: GridLayout, PyLayoutProtocol {
     private let __self__: PyPointer
+    public var boundContainer: NucleantFrame?
+    public var boundChildren:  [NucleantFrame?] = []
 
     public var columns: [GridItem]
-    @PyProperty public var spacing: Double
-    public var alignment: HorizontalAlignment
+    @PyProperty public var spacing: Double {
+        didSet { if spacing != oldValue { recompute() } }
+    }
+    @PyProperty public var alignment: HorizontalAlignment {
+        didSet { if alignment != oldValue { recompute() } }
+    }
 
     public var tracks: [GridItem] { columns }
     public var orientation: Orientation { .vertical }
@@ -198,10 +240,16 @@ public final class VerticalGrid: GridLayout, PyLayoutProtocol {
 @PyClass(self_ref: true)
 public final class HorizontalGrid: GridLayout, PyLayoutProtocol {
     private let __self__: PyPointer
+    public var boundContainer: NucleantFrame?
+    public var boundChildren:  [NucleantFrame?] = []
 
     public var rows: [GridItem]
-    @PyProperty public var spacing: Double
-    public var alignment: VerticalAlignment
+    @PyProperty public var spacing: Double {
+        didSet { if spacing != oldValue { recompute() } }
+    }
+    @PyProperty public var alignment: VerticalAlignment {
+        didSet { if alignment != oldValue { recompute() } }
+    }
 
     public var tracks: [GridItem] { rows }
     public var orientation: Orientation { .horizontal }

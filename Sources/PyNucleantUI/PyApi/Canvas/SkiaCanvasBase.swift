@@ -53,7 +53,7 @@ public final class SkiaCanvasBase: PyCanvasBase, SkiaGPUCanvas, PyCapsuleProtoco
             _frame = newValue
             observeFrame()
             if let newValue {
-                rebuildNode(width: Int(newValue.size.x), height: Int(newValue.size.y))
+                resizeNode(width: Int(newValue.size.x), height: Int(newValue.size.y))
             }
         }
     }
@@ -75,7 +75,7 @@ public final class SkiaCanvasBase: PyCanvasBase, SkiaGPUCanvas, PyCapsuleProtoco
             DispatchQueue.main.async {
                 guard let self, generation == self.frameObservationGeneration else { return }
                 if let frame = self._frame {
-                    self.rebuildNode(width: Int(frame.size.x), height: Int(frame.size.y))
+                    self.resizeNode(width: Int(frame.size.x), height: Int(frame.size.y))
                 }
                 self.observeFrame()
             }
@@ -91,13 +91,43 @@ public final class SkiaCanvasBase: PyCanvasBase, SkiaGPUCanvas, PyCapsuleProtoco
         }
     }
 
-    /// The frame-change path. Rebuilding the render node at a new size is
-    /// the window layer's job now (it owns the engine and the Ganesh
-    /// context); this canvas only records the new frame and waits for the
-    /// window to hand a resized node back down through `attach`.
-    private func rebuildNode(width: Int, height: Int) {
-        // TODO(refactor): node rebuild on resize belongs to the engine-owning
-        // window layer, which re-attaches with the resized `ownNode`.
+    /// The frame-change path: resize the render node's VkImage + Ganesh
+    /// surface **in place**. The node keeps its identity (id, composite slot,
+    /// z-order) — the engine mints a new image/surface at the new size and
+    /// swaps them into the existing node, reusing its `SkiaVulkanContext`. A
+    /// resize never remakes the node — that's reserved for the widget
+    /// leaving/rejoining the tree or the canvas being replaced. Before `attach`
+    /// (no node yet) this is a no-op: `attach` sizes the fresh node from the
+    /// frame itself. Any `SkSurface` capsule Python holds is invalidated by the
+    /// swap — skia-python must re-take it after a resize (see `asCapsule`).
+    private func resizeNode(width: Int, height: Int) {
+        guard let engine, let node, width > 0, height > 0,
+              node.width != UInt32(width) || node.height != UInt32(height)
+        else { return }
+
+        // The post shader's compute pipeline points at the node's current
+        // image — take it down before that image is swapped, reinstall it
+        // against the new one after.
+        postShader?.detach()
+        
+        guard engine.resizeSkiaNode(node, id: id, width: width, height: height) else {
+            fputs("SkiaCanvasBase: node resize to \(width)x\(height) failed, keeping old size\n", stderr)
+            // The node was left at the old size — reinstall the shader we just
+            // detached so the canvas keeps its post pass.
+            if let postShader {
+                try? postShader.attach(engine: engine, node: node)
+            }
+            return
+        }
+
+        if let postShader {
+            do {
+                try postShader.attach(engine: engine, node: node)
+            } catch {
+                fputs("SkiaCanvasBase: post shader reinstall after resize failed: \(error)\n", stderr)
+            }
+        }
+        markDirty()
     }
 
     /// This instance's Python identity — set once by tp_init; it *is* self,
@@ -163,7 +193,7 @@ public final class SkiaCanvasBase: PyCanvasBase, SkiaGPUCanvas, PyCapsuleProtoco
             // TODO(refactor): no node yet, and creating one (plus its Ganesh
             // context) is the window's job — it re-attaches with `ownNode`.
         } else if let frame = _frame {
-            rebuildNode(width: Int(frame.size.x), height: Int(frame.size.y))
+            resizeNode(width: Int(frame.size.x), height: Int(frame.size.y))
         }
         // A shader assigned before the node existed waits here — install it
         // once there is both a node and an engine to install through.

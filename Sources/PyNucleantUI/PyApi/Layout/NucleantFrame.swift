@@ -22,7 +22,7 @@ import Observation
 /// render node on change (`PySulphurCanvasBase.observeFrame`). Replacing
 /// the whole frame object still goes through the widget's `frame` setter.
 @Observable
-@PyClass
+@PyClass(self_ref: true)
 public final class NucleantFrame: FrameProtocol, PySerialize, PyDeserialize {
     
     
@@ -48,6 +48,8 @@ public final class NucleantFrame: FrameProtocol, PySerialize, PyDeserialize {
     /// layout maths read flexibility the same way for every frame type.
     public var flexibleWidth: Bool { flexible_width }
     public var flexibleHeight: Bool { flexible_height }
+    
+    var __self__: PyPointer?
 
     public init(pos: SIMD2<Double>, size: SIMD2<Double>) {
         self.pos = pos
@@ -55,9 +57,10 @@ public final class NucleantFrame: FrameProtocol, PySerialize, PyDeserialize {
     }
 
     @PyInit
-    init(x: Double, y: Double, w: Double, h: Double) {
+    init(__self__: PyPointer, x: Double, y: Double, w: Double, h: Double) {
         pos = .init(x, y)
         size = .init(w, h)
+        self.__self__ = __self__
     }
 
     /// The concrete stand-in for a `nil` child: no fixed extent on either
@@ -74,7 +77,7 @@ public final class NucleantFrame: FrameProtocol, PySerialize, PyDeserialize {
     }
     
     public func pyPointer() -> PyPointer {
-        Self.asPyPointer(unretained: self)
+        __self__?.newRef ?? .None //?? Self.asPyPointer(unretained: self)
     }
 }
 

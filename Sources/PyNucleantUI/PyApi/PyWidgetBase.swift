@@ -53,16 +53,16 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
     /// takes the remaining parent space (SwiftUI's no-frame behaviour)
     /// instead of inheriting the parent's frame as a fixed size. Assigning
     /// `frame = None` from Python resets it back to flexible.
-    private var _frame: NucleantFrame = NucleantFrame(flexible: .zero)
+    private var _frame: NucleantFrame? = NucleantFrame(flexible: .zero)
 
     @PyProperty
     public var frame: NucleantFrame? {
         get { _frame }
         set {
-            _frame = newValue ?? NucleantFrame(flexible: .zero)
+            _frame = newValue //?? NucleantFrame(flexible: .zero)
             // On a live node canvas, handing the (possibly just-reset) frame
             // down is what triggers the render-node resize.
-            _canvas?.frame = frame
+            _canvas?.frame = newValue
             // Container size changed → re-place children under any layout.
             runLayout()
         }
@@ -202,10 +202,12 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
     /// pass isn't driven automatically.
     public func runLayout() {
         guard let activeLayout = _layout, let container = frame else { return }
-        _ = activeLayout.applyFrames(
-            container: container,
-            children: children.map { $0.frame }
-        )
+        // Hand the frames to the layout and let it place them. The layout
+        // keeps them so a later `spacing`/`alignment` change can recompute
+        // on its own — it never calls back here.
+        activeLayout.boundContainer = container
+        activeLayout.boundChildren  = children.map { $0.frame }
+        activeLayout.recompute()
     }
 
     func on_render(dt: Double) {

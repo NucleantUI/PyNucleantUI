@@ -47,7 +47,7 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
             _frame = newValue
             observeFrame()
             if let newValue {
-                rebuildNode(width: Int(newValue.size.x), height: Int(newValue.size.y))
+                resizeNode(width: Int(newValue.size.x), height: Int(newValue.size.y))
             }
         }
     }
@@ -74,7 +74,7 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
             DispatchQueue.main.async {
                 guard let self, generation == self.frameObservationGeneration else { return }
                 if let frame = self._frame {
-                    self.rebuildNode(width: Int(frame.size.x), height: Int(frame.size.y))
+                    self.resizeNode(width: Int(frame.size.x), height: Int(frame.size.y))
                 }
                 self.observeFrame()
             }
@@ -90,41 +90,38 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
         }
     }
 
-    /// The frame-change path: replace the render node with one at the new
-    /// size. The `base` canvas is adopted by the new node (ThorVG keeps
-    /// its paints, Python-held capsules stay valid) and the post shader
-    /// object survives — only its pipeline is rebuilt, since it points at
-    /// the old node's image. Before `attach` this is a no-op: `attach`
+    /// The frame-change path: resize the render node's VkImage **in place**.
+    /// The node keeps its identity (id, composite slot, z-order) — the engine
+    /// mints a new image at the new size, retargets this canvas's ThorVG onto
+    /// it, and swaps the GPU handles into the existing node. `base` is
+    /// unchanged (same `Tvg_Canvas`, just a new target), so ThorVG's paints and
+    /// any Python-held capsules stay valid. A resize never remakes the node —
+    /// that's reserved for the widget leaving/rejoining the tree or the canvas
+    /// being replaced. Before `attach` (no node yet) this is a no-op: `attach`
     /// sizes the fresh node from the frame itself.
-    private func rebuildNode(width: Int, height: Int) {
-        guard let engine, let oldNode = node, width > 0, height > 0,
-              oldNode.width != UInt32(width) || oldNode.height != UInt32(height)
+    private func resizeNode(width: Int, height: Int) {
+        guard let engine, let node, width > 0, height > 0,
+              node.width != UInt32(width) || node.height != UInt32(height)
         else { return }
 
-        // Build first — adopting `base` keeps ThorVG's paints and any
-        // Python-held capsules valid — so a failure leaves the old node
-        // drawing at the old size instead of the widget going dark. All wgpu
-        // stays inside the engine/ThorVG; the new node frees its own target
-        // (`releaseExternal`) when its VkImage goes.
-        guard let built = engine.makeThorWidgetNode(adopting: base, width: width, height: height) else {
-            fputs("ThorCanvasBase: node rebuild at \(width)x\(height) failed, keeping old size\n", stderr)
+        // The post shader's compute pipeline points at the node's current
+        // image — take it down before that image is swapped, reinstall it
+        // against the new one after.
+        postShader?.detach()
+
+        guard engine.resizeThorNode(node, id: id, width: width, height: height) else {
+            fputs("ThorCanvasBase: node resize to \(width)x\(height) failed, keeping old size\n", stderr)
+            // The node was left at the old size — reinstall the shader we just
+            // detached so the canvas keeps its post pass.
+            if let postShader {
+                try? postShader.attach(engine: engine, node: node)
+            }
             return
         }
 
-        // The post shader's pipeline points at the old node's image — take it
-        // down before that node leaves the composite.
-        postShader?.detach()
-
-        // Same-id swap: keeps z-order and frees the old node's image
-        // (`replace` destroys it). Re-hand the widget frame to the fresh slot
-        // so the composite keeps positioning it.
-        engine.replace(id: id, with: .thor(built))
-        engine.node(withId: id)?.frame = _frame
-        node = built
-
         if let postShader {
             do {
-                try postShader.attach(engine: engine, node: built)
+                try postShader.attach(engine: engine, node: node)
             } catch {
                 fputs("ThorCanvasBase: post shader reinstall after resize failed: \(error)\n", stderr)
             }
@@ -213,7 +210,7 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
         } else if let frame = _frame {
             // Already-built node re-attaching under a frame that changed
             // while detached — same path as a live frame change.
-            rebuildNode(width: Int(frame.size.x), height: Int(frame.size.y))
+            resizeNode(width: Int(frame.size.x), height: Int(frame.size.y))
         }
         // A shader assigned before the node existed waits here — install it
         // once there is both a node and an engine to install through. The
