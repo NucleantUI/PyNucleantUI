@@ -8,7 +8,8 @@ import PySwiftKit
 import PySerializing
 import PySwiftWrapper
 import Foundation
-
+import PyNucleantUI
+import PNU_Layout
 
 /// The canvas over a CPU-fed `PixelBufferShaderNode`: a fixed-resolution
 /// pixel surface some producer (the NES PPU, any software renderer)
@@ -23,9 +24,9 @@ import Foundation
 /// composite pass scales the image to the window. Frame changes are
 /// recorded but don't rebuild anything.
 @PyClass(self_ref: true)
-public final class PixelBufferCanvasBase: PyCanvasBase {
+public final class PixelBufferCanvasBase: PyCanvasBase, @unchecked Sendable {
 
-    public var id: Int = UUID().hashValue
+    public let id: Int = UUID().hashValue
 
     /// Fixed content resolution, set at `__init__` — the size the
     /// producer writes, not the widget's on-screen size.
@@ -38,7 +39,7 @@ public final class PixelBufferCanvasBase: PyCanvasBase {
     /// surface with real subpixels. 1 = the plain old direct-copy path.
     public let contentScale: Int
 
-    public typealias Node = PixelBufferShaderNode<RenderNode>
+    public typealias Node = PixelBufferShaderNode<RenderNode<NucleantFrame>>
     public private(set) var node: Node?
     /// The engine reference is the window's to supply — the one place a
     /// pixel canvas touches NucleantVulkan is installing a compute post

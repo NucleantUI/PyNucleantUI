@@ -1,7 +1,33 @@
+[build-system]
+requires = ["pyswiftkit-builder"]
+build-backend = "pyswiftkit_builder"
+
 [project]
 name = "nucleant"
 version = "0.1.0"
 description = "Add your description here"
   
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+   
+]
+
+# [tool.setuptools.packages.find]
+# where = ["src"]
+# include = ["greeter*", "modals*", "py_filemanager*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.so", "*.dylib", "*.pyi", "py.typed"]
+
+[tool.pyswiftkit]
+source-dir = "src/nucleant"           # Python packages live under src/<name>/
+products = [
+    "app",
+    "canvas",
+    "_layout",
+    "widget",
+    "window"
+]
+
+[tool.uv.sources]
+pyswiftkit-builder = { path = "../../../../../../Volumes/CodeSSD/dev_projects/pyswiftkit/pyswiftkit-builder" }

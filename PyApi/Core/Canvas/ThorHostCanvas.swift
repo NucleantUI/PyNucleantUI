@@ -12,6 +12,8 @@ import Observation
 import Dispatch
 import Foundation
 
+import PyNucleantUI
+
 import NucleantThorVG
 
 public protocol ThorHostCanvas: PySerializable, PyClassProtocol, AnyObject {
@@ -20,14 +22,15 @@ public protocol ThorHostCanvas: PySerializable, PyClassProtocol, AnyObject {
     /// The widget holding this canvas. Canvases record their owner and
     /// widgets their parent — that chain is how nested scene canvases find
     /// the canvas they composite through.
-    var owner: PyWidgetBase? { get set }
+    associatedtype Owner: WidgetProtocol
+    var owner: Owner? { get set }
 
     /// The frame that sizes this canvas — handed down by the owner widget
     /// on assignment and on every later frame change. nil keeps the old
     /// behavior: adapt to the attach-time (nearest parent) size. Node
     /// canvases rebuild their render node to match; scene canvases only
-    /// record it — their pixels live on the host's node.
-    var frame: NucleantFrame? { get set }
+    associatedtype Frame: FrameProtocol & AnyObject
+    var frame: Frame? { get set }
 
     /// Bind into the render pipeline. Node canvases build (or adopt
     /// `ownNode`) their render node here; scene canvases resolve the
@@ -36,7 +39,7 @@ public protocol ThorHostCanvas: PySerializable, PyClassProtocol, AnyObject {
     func attach(
         //engine:  VulkanRenderEngine,
         //wgpu:    WgpuContext,
-        ownNode: ThorShaderNode<RenderNode>?,
+        ownNode: ThorShaderNode<RenderNode<Frame>>?,
         width:   Int,
         height:  Int
     )

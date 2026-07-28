@@ -11,6 +11,10 @@ import PySwiftWrapper
 import NucleantApplication
 import NucleantWindow
 import NucleantVulkan
+import PyNucleantUI
+import PNU_App
+import PNU_Layout
+import PNU_Core
 #if os(macOS)
 import AppKit
 import Platform_MacOS
@@ -20,24 +24,23 @@ import UIKit
 import Platform_iOS
 #endif
 
-extension PyNucleantUI_Package {
+
+@PyModule
+fileprivate struct window: PyModuleProtocol {
     
-    @PyModule(name: "_nucleant.window")
-    struct Window: PyModuleProtocol {
-        
-        static let py_classes: [any (PyClassProtocol & AnyObject).Type] = [
-            WindowBase.self
-        ]
-        
-    }
+    static let py_classes: [any (PyClassProtocol & AnyObject).Type] = [
+        WindowBase.self
+    ]
+    
 }
+
 
 
 
 @PyClass(
     self_ref: true
 )
-final class WindowBase: NucleantWindow, PyDeserialize {
+final class WindowBase: NucleantWindow, PyDeserialize, @unchecked Sendable {
     
     fileprivate weak var app: PyApp?
     
@@ -69,7 +72,7 @@ final class WindowBase: NucleantWindow, PyDeserialize {
     // UIWindow); only one is in scope per build.
     var platformWindow: PlatformWindow<WindowBase>?
     #endif
-    var renderEngine: VulkanRenderEngine<RenderNode>?
+    var renderEngine: VulkanRenderEngine<RenderNode<NucleantFrame>>?
     var rootWidget: PyWidgetBase?
     
     var win_rect: SIMD4<Int>

@@ -13,7 +13,8 @@ import PySwiftWrapper
 import Observation
 import Dispatch
 import Foundation
-
+import PyNucleantUI
+import PNU_Layout
 
 
 /// The canvas that talks to the render node. Owns the whole GPU side of
@@ -28,7 +29,7 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
 
     public var base: Tvg_Canvas
     
-    public typealias Node = ThorShaderNode<RenderNode>
+    public typealias Node = ThorShaderNode<RenderNode<NucleantFrame>>
     public private(set) var node: Node?
     //private var thorTexture: WGPUTexture?
     
@@ -184,7 +185,7 @@ public final class ThorCanvasBase: PyCanvasBase, ThorHostCanvas ,ThorGPUCanvas, 
     /// the old design and is deliberately gone (see rules: the canvas must
     /// not reach for the engine or webgpu to make a node).
     public func attach(
-        ownNode: ThorShaderNode<RenderNode>?,
+        ownNode: ThorShaderNode<RenderNode<NucleantFrame>>?,
         width:   Int,
         height:  Int
     ) {

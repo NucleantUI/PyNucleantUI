@@ -10,8 +10,8 @@ import PySwiftWrapper
 import Observation
 import Dispatch
 import Foundation
-
-
+import PyNucleantUI
+import PNU_Layout
 /// The Skia counterpart of `ThorCanvasBase`: owns the widget-facing side of
 /// one widget's Skia-drawn 2D content — the `SkiaShaderNode` composited by
 /// the Vulkan engine and any compute post shader. Widgets never touch the
@@ -29,11 +29,11 @@ import Foundation
 /// The surface lives on the node's VkImage, so take the capsule inside
 /// `on_canvas` or later, and re-take it after any resize.
 @PyClass(self_ref: true)
-public final class SkiaCanvasBase: PyCanvasBase, SkiaGPUCanvas, PyCapsuleProtocol {
+public final class SkiaCanvasBase: PyCanvasBase, SkiaGPUCanvas, PyCapsuleProtocol, @unchecked Sendable {
 
     public var id: Int = UUID().hashValue
 
-    public typealias Node = SkiaShaderNode<RenderNode>
+    public typealias Node = SkiaShaderNode<RenderNode<NucleantFrame>>
     public private(set) var node: Node?
 
     /// The engine reference is the window's to supply — the one place a
@@ -178,7 +178,7 @@ public final class SkiaCanvasBase: PyCanvasBase, SkiaGPUCanvas, PyCapsuleProtoco
     /// window (which owns the engine and the Ganesh context) and handed
     /// down as `ownNode`.
     public func attach(
-        ownNode: SkiaShaderNode<RenderNode>?,
+        ownNode: SkiaShaderNode<RenderNode<NucleantFrame>>?,
         width:   Int,
         height:  Int
     ) {

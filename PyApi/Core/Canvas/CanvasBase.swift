@@ -5,6 +5,7 @@
 import PySwiftKit
 import PySerializing
 import NucleantVulkan
+import PyNucleantUI
 //import SulphurUI
 
 public protocol CanvasBase: AnyObject, Identifiable {
@@ -13,7 +14,7 @@ public protocol CanvasBase: AnyObject, Identifiable {
     /// The widget holding this canvas. Canvases record their owner and
     /// widgets their parent — that chain is how nested scene canvases find
     /// the canvas they composite through.
-    associatedtype Widget: WidgetProtocol
+    associatedtype Widget: WidgetProtocol & AnyObject
     var owner: Widget? { get set }
 
     /// The frame that sizes this canvas — handed down by the owner widget
@@ -21,7 +22,7 @@ public protocol CanvasBase: AnyObject, Identifiable {
     /// behavior: adapt to the attach-time (nearest parent) size. Node
     /// canvases rebuild their render node to match; scene canvases only
     /// record it — their pixels live on the host's node.
-    associatedtype Frame: FrameProtocol
+    associatedtype Frame: FrameProtocol & AnyObject
     var frame: Frame? { get set }
 
     /// Bind into the render pipeline. Node canvases build (or adopt

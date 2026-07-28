@@ -3,10 +3,10 @@
 //  PyNucleantUI
 //
 
-
+ import PyWrapperInfo
 @preconcurrency import PySwiftKit
 @preconcurrency import PySerializing
-import PySwiftWrapper
+@preconcurrency import PySwiftWrapper
 import NucleantApplication
 #if os(macOS)
 import AppKit
@@ -22,7 +22,7 @@ import NucleantThorVG
     self_ref: true
 )
 
-final class PyApp: NucleantApplication {
+public final class PyApp: NucleantApplication, @unchecked Sendable {
     
     let __self__: PyPointer
     
@@ -43,7 +43,7 @@ final class PyApp: NucleantApplication {
     private var _on_start: PyPointer
 
     #if os(macOS) || os(iOS)
-    var appDelegate: AppDelegate<PyApp>?
+    public var appDelegate: AppDelegate<PyApp>?
     #endif
 
     @PyMethod()
@@ -82,7 +82,7 @@ final class PyApp: NucleantApplication {
         }
     }
     
-    func onStart() {
+    public func onStart() {
         // Platform launch (NSApplicationDelegate.applicationDidFinishLaunching)
         // lands here — bridge it into Python's `on_start`, where the app
         // subclass builds initial state and presents its window(s).
@@ -102,14 +102,17 @@ extension PyApp {
     
 }
 
-extension PyNucleantUI_Package {
-    @PyModule(name: "_nucleant.app")
-    struct AppModule: PyModuleProtocol {
-        
-        static let py_classes: [any (PyClassProtocol & AnyObject).Type] = [
-            PyApp.self
-        ]
-    }
-}
 
+
+@PyModule
+fileprivate struct app: PyModuleProtocol, @unchecked Sendable {
+    
+    static let py_classes: [any (PyClassProtocol & AnyObject).Type] = [
+        PyApp.self,
+    ]
+    
+
+    static let modules: [any (PyModuleProtocol).Type] = []
+    
+}
 

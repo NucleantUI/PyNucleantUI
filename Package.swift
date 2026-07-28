@@ -2,9 +2,62 @@
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
+import Foundation
 
 let nucleantDev = true
-let pskDev = false
+let pskDev = true
+
+let env = ProcessInfo.processInfo.environment
+
+let PSK_DEVELOPMENT = env["PSK_DEVELOPMENT"] == "1"
+let PIP_MODE = env["PIP_MODE"] == "1"
+
+
+enum PythonMode {
+    case pip
+    case android
+    case development
+    case normal
+    
+    static let shared = Self.current()
+    
+    static func current() -> Self {
+        if PIP_MODE { return .pip }
+        if PSK_DEVELOPMENT { return .development }
+        if env["SWIFT_ANDROID_HOME"] != nil { return .android }
+        return .normal
+    }
+    
+    var cSettings: [CSetting] {
+        switch self {
+        case .pip:
+            [.define("PIP_MODE")]
+        case .normal:
+            [.define("FRAMEWORK_MODE")]
+        case .android:
+            [.define("PIP_MODE")]
+        case .development:
+            []
+        }
+    }
+    
+    var linkerSettings: [LinkerSetting] {
+        switch self {
+        case .pip:
+            PSK_DEVELOPMENT ? [
+                .linkedFramework("Python"),
+                .linkedFramework("MoltenVK")
+            ] : []
+        case .normal:
+            [.linkedFramework("Python")]
+        case .android:
+            []
+        case .development:
+            []
+        }
+    }
+}
+
 
 func getDependencies() -> [Package.Dependency] {
     var deps = [Package.Dependency]()
@@ -46,6 +99,120 @@ func getDependencies() -> [Package.Dependency] {
     return deps
 }
 
+func pipTargets() -> [Target] {
+    var targets = [Target]()
+    
+    if PIP_MODE {
+        targets.append(
+            contentsOf: [
+                .target(
+                    name: "PNU_App",
+                    dependencies: [
+                        .product(name: "PySwiftKit", package: "PySwiftKit"),
+                        .product(name: "NucleantApplication", package: "NucleantApplication"),
+                        .product(name: "NucleantThorVG", package: "NucleantThorVG"),
+                    ],
+                    path: "PyApi/App",
+                    swiftSettings: [.swiftLanguageMode(.v5)],
+                    linkerSettings: PythonMode.shared.linkerSettings,
+                ),
+                .target(
+                    name: "PNU_Canvas",
+                    dependencies: [
+                        "PNU_Core",
+                        .product(name: "PySwiftKit", package: "PySwiftKit"),
+                        //.product(name: "NucleantApplication", package: "NucleantApplication"),
+                        
+                    ],
+                    path: "PyApi/Canvas",
+                    swiftSettings: [.swiftLanguageMode(.v5)],
+                    linkerSettings: PythonMode.shared.linkerSettings,
+                ),
+                .target(
+                    name: "PNU_Core",
+                    dependencies: [
+                        "PNU_Layout",
+                        .product(name: "PySwiftKit", package: "PySwiftKit"),
+                        .product(name: "NucleantApplication", package: "NucleantApplication"),
+                        //.product(name: "NucleantThorVG", package: "NucleantThorVG"),
+                        .product(name: "NucleantVulkan", package: "NucleantVulkan"),
+                        .product(name: "VulkanCore", package: "NucleantVulkan"),
+                        .product(name: "NucleantSkia", package: "NucleantSkia"),
+                        .product(name: "NucleantThorVG", package: "NucleantThorVG"),
+                    ],
+                    path: "PyApi/Core",
+                    swiftSettings: [
+                        .swiftLanguageMode(.v5)
+                    ],
+                    linkerSettings: PythonMode.shared.linkerSettings,
+                ),
+                .target(
+                    name: "PNU_Widget",
+                    dependencies: [
+                        "PNU_Core",
+                        .product(name: "PySwiftKit", package: "PySwiftKit"),
+                        .product(name: "NucleantApplication", package: "NucleantApplication"),
+                        //.product(name: "NucleantThorVG", package: "NucleantThorVG"),
+                    ],
+                    path: "PyApi/Widget",
+                    swiftSettings: [
+                        .swiftLanguageMode(.v5)
+                    ],
+                    linkerSettings: PythonMode.shared.linkerSettings,
+                ),
+                .target(
+                    name: "PNU_Layout",
+                    dependencies: [
+                        "PyNucleantUI",
+                        .product(name: "PySwiftKit", package: "PySwiftKit"),
+                        .product(name: "NucleantApplication", package: "NucleantApplication"),
+                        //.product(name: "NucleantThorVG", package: "NucleantThorVG"),
+                    ],
+                    path: "PyApi/Layout",
+                    swiftSettings: [
+                        .swiftLanguageMode(.v5)
+                    ],
+                    linkerSettings: PythonMode.shared.linkerSettings,
+                ),
+                .target(
+                    name: "PNU_Window",
+                    dependencies: [
+                        "PyNucleantUI",
+                        "PNU_Widget",
+                        "PNU_App",
+                        .product(name: "PySwiftKit", package: "PySwiftKit"),
+                        .product(name: "NucleantApplication", package: "NucleantApplication"),
+                        .product(name: "NucleantWindow", package: "NucleantApplication"),
+                        //.product(name: "NucleantThorVG", package: "NucleantThorVG"),
+                    ],
+                    path: "PyApi/Window",
+                    swiftSettings: [
+                        .swiftLanguageMode(.v5)
+                    ],
+                    linkerSettings: PythonMode.shared.linkerSettings,
+                ),
+            ]
+        )
+    }
+    
+    return targets
+}
+
+func pyModules() -> [Product] {
+    var products =  [Product]()
+    if PIP_MODE {
+        products.append(contentsOf: [
+            .library(name: "app", type: .dynamic, targets: ["PNU_App"]),
+            .library(name: "canvas", type: .dynamic, targets: ["PNU_Canvas"]),
+            .library(name: "widget", type: .dynamic, targets: ["PNU_Widget"]),
+            .library(name: "_layout", type: .dynamic, targets: ["PNU_Layout"]),
+            .library(name: "core", type: .dynamic, targets: ["PNU_Core"]),
+            .library(name: "window", type: .dynamic, targets: ["PNU_Window"])
+        ])
+    }
+    return products
+}
+
 let package = Package(
     name: "PyNucleantUI",
     platforms: [
@@ -62,7 +229,7 @@ let package = Package(
             name: "PyNucleantUI",
             targets: ["PyNucleantUI"]
         ),
-    ],
+    ] + pyModules(),
     dependencies: getDependencies(),
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -87,7 +254,7 @@ let package = Package(
                 .swiftLanguageMode(.v5)
             ],
             linkerSettings: [
-                .linkedFramework("Python")
+                //.linkedFramework("Python")
             ]
         ),
         // The Python-buffer node kind, kept out of the engine (it speaks
@@ -105,9 +272,9 @@ let package = Package(
                 swiftSettings: [
                     .swiftLanguageMode(.v5)
                 ],
-                linkerSettings: [
-                    .linkedFramework("Python")
-                ]
+                linkerSettings: PSK_DEVELOPMENT ? [
+                    .linkedFramework("Python"),
+                ] : []
             ),
         .target(
             name: "KvLangBuilder",
@@ -131,6 +298,6 @@ let package = Package(
             name: "PyNucleantUITests",
             dependencies: ["PyNucleantUI"]
         ),
-    ],
+    ] + pipTargets(),
     cxxLanguageStandard: .cxx17
 )
