@@ -13,6 +13,9 @@ DerivedData/
 build/
 Package.resolved
 
+# cibuildwheel output
+/wheelhouse/
+
 # Compiled Python extension modules produced by the Swift build.
 src/nucleant/*.so
 src/nucleant/*.dylib

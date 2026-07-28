@@ -1,5 +1,5 @@
 [build-system]
-requires = ["pyswiftkit-builder"]
+requires = ["pyswiftkit-builder @ git+https://github.com/py-swift/pyswiftkit-builder"]
 build-backend = "pyswiftkit_builder"
 
 [project]
@@ -29,5 +29,17 @@ products = [
     "window"
 ]
 
-[tool.uv.sources]
-pyswiftkit-builder = { path = "../pyswiftkit-builder" }
+# cibuildwheel builds through `python -m build` + pip, so the backend has to be
+# reachable by pip — hence the git+https reference in [build-system] above rather
+# than a local path. Run it from this directory:
+#   cibuildwheel --platform macos --output-dir ./wheelhouse
+[tool.cibuildwheel.macos]
+# The .so files resolve libPySwiftKit/MoltenVK/ThorVG/wgpu through @rpath at
+# runtime — from the sibling pyswiftkit wheel, not from this one. delocate must
+# not try to vendor them in.
+repair-wheel-command = "delocate-wheel --ignore-missing-dependencies -w {dest_dir} {wheel}"
+
+[tool.cibuildwheel.macos.environment]
+# The Swift graph targets macOS 14; cibuildwheel otherwise defaults to 10.13 and
+# delocate rejects the wheel for not satisfying the target version.
+MACOSX_DEPLOYMENT_TARGET = "14.0"
