@@ -30,4 +30,4 @@ products = [
 ]
 
 [tool.uv.sources]
-pyswiftkit-builder = { path = "../../../../../../Volumes/CodeSSD/dev_projects/pyswiftkit/pyswiftkit-builder" }
+pyswiftkit-builder = { path = "../pyswiftkit-builder" }
