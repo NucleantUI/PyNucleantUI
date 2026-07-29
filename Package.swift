@@ -59,6 +59,19 @@ enum PythonMode {
 }
 
 
+/// Dependencies on modules vended by the NucleantApplication package.
+///
+/// In PIP_MODE that package ships a *single* dynamic library holding all of its
+/// targets, so every module it vends — NucleantApplication, NucleantWindow,
+/// Platform_MacOS, Platform_iOS — is reached through the one product name. A
+/// library product vends all of its targets' modules, so the `import`s are
+/// unaffected. In static mode each module keeps its own product, as before.
+func nucleantApplication(_ modules: Target.Dependency...) -> [Target.Dependency] {
+    PIP_MODE
+        ? [.product(name: "NucleantApplication", package: "NucleantApplication")]
+        : modules
+}
+
 func getDependencies() -> [Package.Dependency] {
     var deps = [Package.Dependency]()
     
@@ -181,10 +194,11 @@ func pipTargets() -> [Target] {
                         "PNU_Widget",
                         "PNU_App",
                         .product(name: "PySwiftKit", package: "PySwiftKit"),
-                        .product(name: "NucleantApplication", package: "NucleantApplication"),
-                        .product(name: "NucleantWindow", package: "NucleantApplication"),
                         //.product(name: "NucleantThorVG", package: "NucleantThorVG"),
-                    ],
+                    ] + nucleantApplication(
+                        .product(name: "NucleantApplication", package: "NucleantApplication"),
+                        .product(name: "NucleantWindow", package: "NucleantApplication")
+                    ),
                     path: "PyApi/Window",
                     swiftSettings: [
                         .swiftLanguageMode(.v5)
@@ -201,14 +215,27 @@ func pipTargets() -> [Target] {
 func pyModules() -> [Product] {
     var products =  [Product]()
     if PIP_MODE {
-        products.append(contentsOf: [
-            .library(name: "app", type: .dynamic, targets: ["PNU_App"]),
-            .library(name: "canvas", type: .dynamic, targets: ["PNU_Canvas"]),
-            .library(name: "widget", type: .dynamic, targets: ["PNU_Widget"]),
-            .library(name: "_layout", type: .dynamic, targets: ["PNU_Layout"]),
-            .library(name: "core", type: .dynamic, targets: ["PNU_Core"]),
-            .library(name: "window", type: .dynamic, targets: ["PNU_Window"])
-        ])
+        // One dynamic library for every Python module, not one per module.
+        //
+        // SwiftPM links a same-package target dependency *statically* even when
+        // that target is also its own dynamic product. With a product per
+        // module, PNU_Core landed in canvas/widget/window, PNU_Layout in four
+        // images, PyNucleantUI in four and PNU_App in two — and two copies of a
+        // Swift module in one process means two type descriptors, so
+        // conformance lookup and generic metadata instantiation break across
+        // the boundary (widget's PyWidgetBase is not window's). Collapsing the
+        // targets into a single image leaves exactly one descriptor each.
+        //
+        // Each @PyModule still emits its own @_cdecl("PyInit_<name>"), so the
+        // five entry points simply share a library; nucleant/__init__.py points
+        // the module names at it.
+        products.append(
+            .library(
+                name: "_nucleant",
+                type: .dynamic,
+                targets: ["PNU_App", "PNU_Canvas", "PNU_Core", "PNU_Layout", "PNU_Widget", "PNU_Window"]
+            )
+        )
     }
     return products
 }
@@ -225,8 +252,14 @@ let package = Package(
     ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
+        // Static in both modes. This product exists for the Xcode app, which
+        // links it and calls PyNucleantUI_Package.addToImports(); in PIP_MODE
+        // nothing consumes it, and the PNU_* targets pull the PyNucleantUI
+        // module into _nucleant.so directly. Making it dynamic there only built
+        // a second, unshipped libPyNucleantUI.dylib holding a duplicate copy.
         .library(
             name: "PyNucleantUI",
+            type: .static,
             targets: ["PyNucleantUI"]
         ),
     ] + pyModules(),
@@ -240,16 +273,17 @@ let package = Package(
                 "KvLangBuilder",
                 "PyNucleantBuffer",
                 //.product(name: "SulphurCore", package: "SulphurCore"),
-                .product(name: "NucleantApplication", package: "NucleantApplication"),
-                .product(name: "NucleantWindow", package: "NucleantApplication"),
-                .product(name: "Platform_MacOS", package: "NucleantApplication", condition: .when(platforms: [.macOS])),
                 .product(name: "NucleantSkia", package: "NucleantSkia"),
                 .product(name: "NucleantThorVG", package: "NucleantThorVG"),
                 .product(name: "NucleantVulkan", package: "NucleantVulkan"),
                 .product(name: "VulkanCore", package: "NucleantVulkan"),
                 //.product(name: "NucleanShader", package: "NucleantVulkan"),
                 .product(name: "PySwiftKit", package: "PySwiftKit"),
-            ],
+            ] + nucleantApplication(
+                .product(name: "NucleantApplication", package: "NucleantApplication"),
+                .product(name: "NucleantWindow", package: "NucleantApplication"),
+                .product(name: "Platform_MacOS", package: "NucleantApplication", condition: .when(platforms: [.macOS]))
+            ),
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ],

@@ -9,7 +9,7 @@ description = "Add your description here"
   
 requires-python = ">=3.13"
 dependencies = [
-   
+    "pyswiftkit"
 ]
 
 # [tool.setuptools.packages.find]
@@ -21,23 +21,56 @@ dependencies = [
 
 [tool.pyswiftkit]
 source-dir = "src/nucleant"           # Python packages live under src/<name>/
+# A single library holding every Python module, rather than one .so per module
+# — see the comment on `pyModules()` in Package.swift for why (one .so each put
+# PNU_Core/PNU_Layout/PyNucleantUI/PNU_App in several images at once, which
+# breaks Swift type identity across them). The five PyInit_* entry points all
+# live in this one file; nucleant/__init__.py maps the module names onto it.
 products = [
-    "app",
-    "canvas",
-    "_layout",
-    "widget",
-    "window"
+    "_nucleant"
 ]
+
+# Per-platform overrides. Filenames are platform-specific — .dylib/.framework
+# here, .so on Android/Linux, .dll on Windows — so the bundle list belongs in a
+# platform table, never at the top level.
+[tool.pyswiftkit.macos]
+# Copied verbatim into nucleant/.dylibs. Anything listed here that cannot be
+# found fails the build rather than shipping a wheel that is quietly missing it.
+# libPySwiftKit is deliberately absent: it ships in the pyswiftkit wheel and is
+# reached through the @loader_path/../pyswiftkit rpath.
+# libNucleantApplication.dylib is the whole NucleantApplication package in one
+# image — NucleantWindow and Platform_MacOS/Platform_iOS are targets inside it,
+# not separate dylibs. Listing them separately is what put two copies of each
+# module in the process and broke generic metadata lookup for
+# PlatformWindow<WindowBase>; see that package's Package.swift.
+bundle-libs = [
+    "libNucleantApplication.dylib",
+    "libNucleantShader.dylib",
+    "libNucleantSkia.dylib",
+    "libNucleantThorVG.dylib",
+    "libNucleantVulkan.dylib",
+    "libVulkanCore.dylib",
+    "libwgpu_native.dylib",
+    # libNucleantVulkan/libVulkanCore/libNucleantShader load @rpath/MoltenVK.framework
+    # and libNucleantThorVG loads @rpath/ThorVG.framework, so both have to travel
+    # with the wheel. SwiftPM stages them into its bin dir next to the dylibs.
+    "MoltenVK.framework",
+    "ThorVG.framework",
+]
+# Directories searched in addition to the SwiftPM bin dir, relative to this file.
+# bundle-search-paths = ["../NucleantVulkan/.build/release"]
 
 # cibuildwheel builds through `python -m build` + pip, so the backend has to be
 # reachable by pip — hence the git+https reference in [build-system] above rather
 # than a local path. Run it from this directory:
 #   cibuildwheel --platform macos --output-dir ./wheelhouse
 [tool.cibuildwheel.macos]
-# The .so files resolve libPySwiftKit/MoltenVK/ThorVG/wgpu through @rpath at
-# runtime — from the sibling pyswiftkit wheel, not from this one. delocate must
-# not try to vendor them in.
-repair-wheel-command = "delocate-wheel --ignore-missing-dependencies -w {dest_dir} {wheel}"
+# No repair step: bundle-libs already vendored every dependency into
+# nucleant/.dylibs and the @rpath install names resolve through the
+# @loader_path/.dylibs rpath as-is. Left enabled, delocate rewrites those names
+# to longer @loader_path/... paths and dies on "larger updated load commands do
+# not fit" — the load commands have no headerpad to grow into.
+repair-wheel-command = ""
 
 [tool.cibuildwheel.macos.environment]
 # The Swift graph targets macOS 14; cibuildwheel otherwise defaults to 10.13 and

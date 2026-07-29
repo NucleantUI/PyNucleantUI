@@ -19,3 +19,5 @@ Package.resolved
 # Compiled Python extension modules produced by the Swift build.
 src/nucleant/*.so
 src/nucleant/*.dylib
+# Dependencies vendored into the wheel by pyswiftkit-builder's bundle-libs.
+src/nucleant/.dylibs/

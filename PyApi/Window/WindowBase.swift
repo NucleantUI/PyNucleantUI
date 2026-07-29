@@ -151,6 +151,17 @@ final class WindowBase: NucleantWindow, PyDeserialize, @unchecked Sendable {
         platformWindow.title = "Nucleant"
         platformWindow.makeKeyAndOrderFront(nil)
         platformWindow.makeFirstResponder(platformWindow.contentView)
+
+        // 5. Hand Python the initial size. AppKit posts windowDidResize only for
+        //    actual resizes, so without this the Python side never learns how
+        //    big the window is and keeps laying out against whatever default it
+        //    was built with — content ends up sized wrong against a swapchain
+        //    that is already the real dimensions. Going through on_size (rather
+        //    than py_on_size directly) reuses one path for the point→pixel
+        //    scaling, win_rect update and relayout.
+        if let size = platformWindow.contentView?.bounds.size {
+            on_size(w: Double(size.width), h: Double(size.height))
+        }
         #elseif os(iOS)
         // 1. iOS platform window: a UIWindow + root view controller hosting the
         //    CAMetalLayer-backed VulkanView. Its display link is already
@@ -197,9 +208,14 @@ final class WindowBase: NucleantWindow, PyDeserialize, @unchecked Sendable {
         if let root {
             RenderBinder.bind(tree: root, into: engine, width: win_rect.z, height: win_rect.w)
         }
-        //py_on_size(w: win_rect.z.scaled(scale), h: win_rect.w.scaled(scale))
         // 4. Show it.
         platformWindow.makeKeyAndVisible()
+
+        // 5. Hand Python the initial size — same reason as macOS: nothing else
+        //    delivers it until the window actually resizes. Pass points and let
+        //    on_size apply contentsScale; win_rect above is already in pixels,
+        //    so scaling it again here would double it.
+        on_size(w: Double(screenBounds.width), h: Double(screenBounds.height))
         #endif
     }
 
