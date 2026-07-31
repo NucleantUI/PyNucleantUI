@@ -108,6 +108,10 @@ public enum RenderBinder {
                 print("RenderBinder: py buffer node build failed: \(error)")
             }
 
+        // Zero-copy on every platform: NucleantThorVG's
+        // VulkanRenderEngine+Thor.swift imports the wgpu target's backing
+        // memory straight into a VkImage — VK_EXT_metal_objects on Apple,
+        // VK_KHR_external_memory_fd on Linux.
         case let thor as ThorCanvasBase:
             // The engine builds the wgpu-backed node and adopts the canvas's
             // own `Tvg_Canvas` (so capsules Python already took stay valid).

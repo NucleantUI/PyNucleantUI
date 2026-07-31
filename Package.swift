@@ -72,6 +72,28 @@ func nucleantApplication(_ modules: Target.Dependency...) -> [Target.Dependency]
         : modules
 }
 
+/// Where the local PySwiftKit checkout lives, which differs per machine: it is
+/// a sibling of this package in the Linux tree, and sits on an external volume
+/// on the macOS box. Hardcoding either one breaks the other, so take the first
+/// that actually exists. Every other `pskDev`-style dependency above is a
+/// plain sibling and needs no such treatment.
+func localPySwiftKitPath() -> String {
+    let candidates = [
+        "../PySwiftKit",
+        "/Volumes/CodeSSD/dev_projects/pyswiftkit/PySwiftKit",
+    ]
+    let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    for candidate in candidates {
+        let absolute = candidate.hasPrefix("/")
+            ? candidate
+            : packageDir.appendingPathComponent(candidate).standardized.path
+        if FileManager.default.fileExists(atPath: absolute) { return candidate }
+    }
+    // Nothing found — return the sibling so SwiftPM reports the missing path
+    // rather than this function silently picking an equally absent one.
+    return candidates[0]
+}
+
 func getDependencies() -> [Package.Dependency] {
     var deps = [Package.Dependency]()
     
@@ -95,7 +117,7 @@ func getDependencies() -> [Package.Dependency] {
     
     if pskDev {
         deps.append(contentsOf: [
-            .package(path: "/Volumes/CodeSSD/dev_projects/pyswiftkit/PySwiftKit"),
+            .package(path: localPySwiftKitPath()),
         ])
     } else {
         deps.append(contentsOf: [

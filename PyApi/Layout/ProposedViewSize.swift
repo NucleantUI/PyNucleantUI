@@ -9,7 +9,10 @@
 //  `Orientation` axis instead of swift-cross-ui's `ViewSize` / `Axis`.
 //
 
+// Apple-only module — see the note in Sources/PyNucleantUI/FrameProtocol.swift.
+#if canImport(simd)
 import simd
+#endif
 
 /// A size a container proposes to a child during layout. Either dimension
 /// may be `nil` — *unspecified* — meaning the container isn't constraining

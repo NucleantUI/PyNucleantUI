@@ -6,7 +6,10 @@
 @preconcurrency import PySwiftKit
 import PySerializing
 import PySwiftWrapper
+// Apple-only module — see the note in Sources/PyNucleantUI/FrameProtocol.swift.
+#if canImport(simd)
 import simd
+#endif
 
 /// A layout a widget owns — `widget.layout = GridLayout(...)`. It runs on
 /// frames alone: the widget's own frame is the container, each child hands in

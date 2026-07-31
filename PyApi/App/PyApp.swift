@@ -42,12 +42,15 @@ public final class PyApp: NucleantApplication, @unchecked Sendable {
     
     private var _on_start: PyPointer
 
-    #if os(macOS) || os(iOS)
+    // Must match the guard on the protocol requirement in
+    // NucleantApplication.swift, which covers Linux too — its AppDelegate is
+    // the plain lifecycle object owning the Wayland event loop.
+    #if os(macOS) || os(iOS) || os(Linux)
     public var appDelegate: AppDelegate<PyApp>?
     #endif
 
     @PyMethod()
-    func run() {
+    func run() throws {
         #if os(macOS)
         NSApplication.shared.run()
         #elseif os(iOS)
@@ -60,6 +63,14 @@ public final class PyApp: NucleantApplication, @unchecked Sendable {
         // the loop, run() would call UIApplicationMain here instead — the
         // direct mirror of NSApplication.run().)
         onStart()
+        #elseif os(Linux)
+        // This class declares its own `run()` (required to expose it to
+        // Python as a @PyMethod), which shadows NucleantApplication's
+        // protocol-extension `run() throws` (App+Linux.swift) rather than
+        // inheriting it — so the Linux connect/onStart/event-loop sequence
+        // has to be reached explicitly through the delegate `setup()` already
+        // built.
+        try appDelegate?.run()
         #endif
     }
     

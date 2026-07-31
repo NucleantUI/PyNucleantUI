@@ -11,7 +11,10 @@
 //
 
 //import SulphurUI
+// Apple-only module — see the note in Sources/PyNucleantUI/FrameProtocol.swift.
+#if canImport(simd)
 import simd
+#endif
 import PySwiftKit
 import PySerializing
 import PyNucleantUI
