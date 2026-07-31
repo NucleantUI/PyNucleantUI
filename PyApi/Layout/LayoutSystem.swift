@@ -11,9 +11,13 @@
 //
 
 //import SulphurUI
+// Apple-only module — see the note in Sources/PyNucleantUI/FrameProtocol.swift.
+#if canImport(simd)
 import simd
+#endif
 import PySwiftKit
 import PySerializing
+import PyNucleantUI
 
 /// The stack axis. Mirrors swift-cross-ui's `Orientation`, which lets one
 /// shared algorithm drive both stack directions via `subscript(component:)`.

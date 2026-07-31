@@ -1,7 +1,192 @@
+[build-system]
+requires = ["pyswiftkit-builder @ git+https://github.com/py-swift/pyswiftkit-builder"]
+build-backend = "pyswiftkit_builder"
+
 [project]
 name = "nucleant"
 version = "0.1.0"
 description = "Add your description here"
   
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "pyswiftkit"
+]
+
+# [tool.setuptools.packages.find]
+# where = ["src"]
+# include = ["greeter*", "modals*", "py_filemanager*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.so", "*.dylib", "*.pyi", "py.typed"]
+
+[tool.pyswiftkit]
+source-dir = "src/nucleant"           # Python packages live under src/<name>/
+# A single library holding every Python module, rather than one .so per module
+# — see the comment on `pyModules()` in Package.swift for why (one .so each put
+# PNU_Core/PNU_Layout/PyNucleantUI/PNU_App in several images at once, which
+# breaks Swift type identity across them). The five PyInit_* entry points all
+# live in this one file; nucleant/__init__.py maps the module names onto it.
+products = [
+    "_nucleant"
+]
+
+# Per-platform overrides. Filenames are platform-specific — .dylib/.framework
+# here, .so on Android/Linux, .dll on Windows — so the bundle list belongs in a
+# platform table, never at the top level.
+[tool.pyswiftkit.macos]
+# Copied verbatim into nucleant/.dylibs. Anything listed here that cannot be
+# found fails the build rather than shipping a wheel that is quietly missing it.
+# libPySwiftKit is deliberately absent: it ships in the pyswiftkit wheel and is
+# reached through the @loader_path/../pyswiftkit rpath.
+# libNucleantApplication.dylib is the whole NucleantApplication package in one
+# image — NucleantWindow and Platform_MacOS/Platform_iOS are targets inside it,
+# not separate dylibs. Listing them separately is what put two copies of each
+# module in the process and broke generic metadata lookup for
+# PlatformWindow<WindowBase>; see that package's Package.swift.
+bundle-libs = [
+    "libNucleantApplication.dylib",
+    "libNucleantShader.dylib",
+    "libNucleantSkia.dylib",
+    "libNucleantThorVG.dylib",
+    "libNucleantVulkan.dylib",
+    "libVulkanCore.dylib",
+    "libwgpu_native.dylib",
+    # libNucleantVulkan/libVulkanCore/libNucleantShader load @rpath/MoltenVK.framework
+    # and libNucleantThorVG loads @rpath/ThorVG.framework, so both have to travel
+    # with the wheel. SwiftPM stages them into its bin dir next to the dylibs.
+    "MoltenVK.framework",
+    "ThorVG.framework",
+]
+# Directories searched in addition to the SwiftPM bin dir, relative to this file.
+# bundle-search-paths = ["../NucleantVulkan/.build/release"]
+
+# cibuildwheel builds through `python -m build` + pip, so the backend has to be
+# reachable by pip — hence the git+https reference in [build-system] above rather
+# than a local path. Run it from this directory:
+#   cibuildwheel --platform macos --output-dir ./wheelhouse
+#   cibuildwheel --platform linux --output-dir ./wheelhouse
+[tool.cibuildwheel]
+# Swift has no musl toolchain, so musllinux cannot be built at all.
+skip = ["*-musllinux*"]
+
+[tool.cibuildwheel.macos]
+# No repair step: bundle-libs already vendored every dependency into
+# nucleant/.dylibs and the @rpath install names resolve through the
+# @loader_path/.dylibs rpath as-is. Left enabled, delocate rewrites those names
+# to longer @loader_path/... paths and dies on "larger updated load commands do
+# not fit" — the load commands have no headerpad to grow into.
+repair-wheel-command = ""
+
+[tool.cibuildwheel.macos.environment]
+# The Swift graph targets macOS 14; cibuildwheel otherwise defaults to 10.13 and
+# delocate rejects the wheel for not satisfying the target version.
+MACOSX_DEPLOYMENT_TARGET = "14.0"
+
+# ---------------------------------------------------------------------------
+# Linux
+# ---------------------------------------------------------------------------
+[tool.cibuildwheel.linux]
+# AlmaLinux 9 / glibc 2.34 — the oldest manylinux image new enough to run
+# Swift's official RHEL UBI9 toolchain. The default manylinux_2_28 is
+# AlmaLinux 8 / glibc 2.28, for which Swift publishes no build.
+manylinux-x86_64-image  = "manylinux_2_34"
+manylinux-aarch64-image = "manylinux_2_34"
+
+# Unlike macOS, the repair step is *enabled* here. auditwheel has no equivalent
+# of delocate's load-command size limit, and it is what rewrites the ELF tags a
+# valid manylinux wheel needs — which bundle-libs does not do. Correspondingly,
+# bundle-libs is deliberately left unset for Linux (it appears only under
+# [tool.pyswiftkit.macos]): running both would vendor the Swift runtime twice,
+# once into nucleant/.libs and again into nucleant.libs under hash-mangled
+# names, putting two copies of libswiftCore.so in one process.
+#
+# The excludes are all load-bearing, verified against a real repair run:
+#   libPySwiftKit.so  ships in the sibling pyswiftkit wheel and is reached via
+#                     the $ORIGIN/../pyswiftkit rpath. Without this auditwheel
+#                     aborts ("required library could not be located"), and if
+#                     it did find it we would get the second Swift runtime the
+#                     paragraph above is about.
+#   libvulkan         the loader must be the host's — it resolves host ICD
+#                     files under /usr/share/vulkan.
+#   libwayland-client has to match the compositor actually running.
+#   libfontconfig     owns the system font cache.
+#   libwgpu_native.so ThorVG's `wg` engine (thorvg-cython) and this Swift
+#                     graph's own Vulkan render engine both load wgpu-native,
+#                     and need to land on the *same* loaded instance — same
+#                     class of problem as libPySwiftKit.so above, one level
+#                     down. Both are built from NucleantVulkan/scripts/
+#                     build_wgpu.py's one vendored copy at
+#                     NucleantVulkan/Dependencies/linux/lib/libwgpu_native.so
+#                     (verified via readelf: both this library and
+#                     thorvg-cython's libthorvg-*.so resolve NEEDED
+#                     libwgpu_native.so to that exact path). Vendoring a
+#                     private copy into each wheel separately would give the
+#                     process two independent wgpu contexts instead of one
+#                     shared runtime — matching how macOS already keeps this
+#                     to one instance.
+# Everything genuinely ours is still vendored: the Swift runtime, thorvg,
+# shaderc, spirv-cross.
+repair-wheel-command = """
+auditwheel repair --exclude libPySwiftKit.so \
+                  --exclude 'libvulkan.so.*' \
+                  --exclude 'libwayland-client.so.*' \
+                  --exclude 'libfontconfig.so.*' \
+                  --exclude libwgpu_native.so \
+                  -w {dest_dir} {wheel}
+"""
+
+# Swift itself is NOT installed here: pyswiftkit-builder's own
+# `_linux.ensure_swift()` fetches the pinned toolchain and applies the
+# gcc-toolchain crtbeginS.o symlink fix as part of the actual build step
+# (which runs as root in this image, same as before-all would) — see that
+# module for the fix's discovery/reasoning. That also covers the runtime
+# packages Foundation/Dispatch themselves need (libcurl/libxml2/libedit/
+# libuuid), so this before-all is left with only what's specific to this
+# project: the graphics stack the Linux targets resolve through pkg-config.
+# See Dependencies/linux/README.md in NucleantVulkan for what each one is for.
+before-all = """
+set -eux
+
+dnf install -y epel-release
+dnf install -y \
+  vulkan-loader-devel vulkan-headers \
+  wayland-devel wayland-protocols-devel libxcb-devel libX11-devel \
+  fontconfig-devel zlib-devel \
+  cmake ninja-build git
+
+# shaderc and SPIRV-Cross have no RHEL 9 packages — the .apt() providers named
+# in NucleantVulkan/Package.swift are Debian-only — so both are built here to
+# install the shaderc.pc / spirv-cross-c-shared.pc files that the CShadercLinux
+# and CSPIRVCrossLinux systemLibrary targets resolve through pkg-config.
+git clone --depth 1 --branch v2024.4 https://github.com/google/shaderc /tmp/shaderc
+cd /tmp/shaderc && ./utils/git-sync-deps
+cmake -S /tmp/shaderc -B /tmp/shaderc/b -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
+  -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON -DBUILD_SHARED_LIBS=ON
+cmake --build /tmp/shaderc/b --target install
+
+git clone --depth 1 --branch vulkan-sdk-1.3.290.0 \
+  https://github.com/KhronosGroup/SPIRV-Cross /tmp/spirv-cross
+cmake -S /tmp/spirv-cross -B /tmp/spirv-cross/b -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
+  -DSPIRV_CROSS_SHARED=ON -DSPIRV_CROSS_CLI=OFF -DSPIRV_CROSS_ENABLE_TESTS=OFF
+cmake --build /tmp/spirv-cross/b --target install
+
+pkg-config --exists vulkan shaderc spirv-cross-c-shared
+"""
+
+[tool.cibuildwheel.linux.environment]
+# A platform environment table replaces the top-level one rather than merging,
+# so anything shared has to be repeated here.
+# No PATH entry for Swift: `_linux.ensure_swift()` finds or installs it and
+# mutates its own subprocess env directly, so nothing here needs to know
+# where it ends up.
+PIP_MODE           = "1"
+SWIFT_BUILD_CONFIG = "release"
+CPATH = "$(python3 -c \"import sysconfig; print(sysconfig.get_path('include'))\")"
+
+# Dev-machine override: use the local sibling checkout (with Linux support)
+# instead of the upstream git URL in [build-system].requires — same
+# sibling-path convention as Package.swift's localPySwiftKitPath().
+[tool.uv.sources]
+pyswiftkit-builder = { path = "../pyswiftkit-builder" }

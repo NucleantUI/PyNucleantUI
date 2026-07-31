@@ -3,7 +3,14 @@
 //  ThorUI
 //
 
+// SIMD2/SIMD4 are Swift *standard library* types — Apple's `simd` module only
+// adds the matrix types and free functions (simd_float4x4, normalize, dot, …)
+// that none of this package's layout code uses. There is no `simd` module on
+// Linux, so the import is guarded rather than dropped: on Apple it keeps
+// resolving exactly as before.
+#if canImport(simd)
 import simd
+#endif
 
 public protocol FrameProtocol {
 

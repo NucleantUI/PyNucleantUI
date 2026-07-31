@@ -14,6 +14,7 @@ import PySwiftWrapper
 //import NucleantVulkan
 //import SulphurApplication
 import NucleantVulkan
+import PyNucleantUI
 import Foundation
 import Observation
 
@@ -23,7 +24,7 @@ import Observation
 /// the whole frame object still goes through the widget's `frame` setter.
 @Observable
 @PyClass(self_ref: true)
-public final class NucleantFrame: FrameProtocol, PySerialize, PyDeserialize {
+public final class NucleantFrame: FrameProtocol, PySerialize, PyDeserialize, @unchecked Sendable {
     
     
     @PyProperty
@@ -82,7 +83,7 @@ public final class NucleantFrame: FrameProtocol, PySerialize, PyDeserialize {
 }
 
 
-extension SIMD2: PyDeserialize where Scalar: PyDeserialize {
+extension SIMD2: PySerializing.PyDeserialize where Scalar: PyDeserialize {
     public static func casted(from object: PySwiftKit.PyPointer) throws -> SIMD2<Scalar> {
         .init(
             try PyTuple_GetItem(object, index: 0),
@@ -98,7 +99,7 @@ extension SIMD2: PyDeserialize where Scalar: PyDeserialize {
     }
 }
 
-extension SIMD2: PySerialize where Scalar: PySerialize {
+extension SIMD2: PySerializing.PySerialize where Scalar: PySerialize {
     public func pyPointer() -> PyPointer {
         #PyTupleNew(x, y)
     }

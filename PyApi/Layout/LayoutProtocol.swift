@@ -6,7 +6,10 @@
 @preconcurrency import PySwiftKit
 import PySerializing
 import PySwiftWrapper
+// Apple-only module — see the note in Sources/PyNucleantUI/FrameProtocol.swift.
+#if canImport(simd)
 import simd
+#endif
 
 /// A layout a widget owns — `widget.layout = GridLayout(...)`. It runs on
 /// frames alone: the widget's own frame is the container, each child hands in
@@ -109,7 +112,7 @@ extension PyLayoutProtocol {
 /// Children align across the horizontal axis; `alignment` crosses from Python
 /// as a `HorizontalAlignment` raw value (0 leading / 1 center / 2 trailing).
 @PyClass(self_ref: true)
-public final class VerticalLayout: StackLayoutProtocol, PyLayoutProtocol {
+public final class VerticalLayout: StackLayoutProtocol, PyLayoutProtocol, @unchecked Sendable {
     private let __self__: PyPointer
     public var boundContainer: NucleantFrame?
     public var boundChildren:  [NucleantFrame?] = []
@@ -139,7 +142,7 @@ public final class VerticalLayout: StackLayoutProtocol, PyLayoutProtocol {
 /// Children align across the vertical axis; `alignment` crosses from Python as
 /// a `VerticalAlignment` raw value (0 top / 1 center / 2 bottom).
 @PyClass(self_ref: true)
-public final class HorizontalLayout: StackLayoutProtocol, PyLayoutProtocol {
+public final class HorizontalLayout: StackLayoutProtocol, PyLayoutProtocol, @unchecked Sendable {
     private let __self__: PyPointer
     public var boundContainer: NucleantFrame?
     public var boundChildren:  [NucleantFrame?] = []
@@ -201,7 +204,7 @@ extension GridLayout {
 /// Vertical grid (SwiftUI's `LazyVGrid`): grows downward; `columns` are the
 /// cross-axis tracks. `widget.layout = VerticalGrid(columns=[GridItem(...)])`.
 @PyClass(self_ref: true)
-public final class VerticalGrid: GridLayout, PyLayoutProtocol {
+public final class VerticalGrid: GridLayout, PyLayoutProtocol, @unchecked Sendable {
     private let __self__: PyPointer
     public var boundContainer: NucleantFrame?
     public var boundChildren:  [NucleantFrame?] = []
@@ -238,7 +241,7 @@ public final class VerticalGrid: GridLayout, PyLayoutProtocol {
 /// Horizontal grid (SwiftUI's `LazyHGrid`): grows rightward; `rows` are the
 /// cross-axis tracks. `widget.layout = HorizontalGrid(rows=[GridItem(...)])`.
 @PyClass(self_ref: true)
-public final class HorizontalGrid: GridLayout, PyLayoutProtocol {
+public final class HorizontalGrid: GridLayout, PyLayoutProtocol, @unchecked Sendable {
     private let __self__: PyPointer
     public var boundContainer: NucleantFrame?
     public var boundChildren:  [NucleantFrame?] = []
@@ -279,7 +282,7 @@ public final class HorizontalGrid: GridLayout, PyLayoutProtocol {
 /// with `minimum` / `maximum` bounds; for `.fixed`, `minimum` is the exact
 /// extent. Defaults mirror SwiftUI's `.flexible()`.
 @PyClass
-public final class GridItem: PyDeserialize {
+public final class GridItem: PyDeserialize, @unchecked Sendable {
     /// Sizing mode.
     @PyProperty public var kind: GridSize
     /// Lower bound, or the exact extent when `kind == fixed`.

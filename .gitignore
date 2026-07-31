@@ -9,7 +9,17 @@ DerivedData/
 
 # Reference-only copies of pre-refactor code, kept outside Sources/
 # while the render/graphics stack is being split into sibling packages.
-/PyApi/
 /RenderEngine/
 build/
 Package.resolved
+
+# cibuildwheel output
+/wheelhouse/
+
+# Compiled Python extension modules produced by the Swift build.
+src/nucleant/*.so
+src/nucleant/*.dylib
+# Dependencies vendored into the wheel by pyswiftkit-builder's bundle-libs
+# (.dylibs on Mach-O) or by auditwheel on Linux (.libs / nucleant.libs).
+src/nucleant/.dylibs/
+src/nucleant/.libs/

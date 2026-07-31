@@ -31,6 +31,9 @@ import NucleantShader
 import PySwiftKit
 import PySerializing
 import PySwiftWrapper
+import PyNucleantUI
+import PNU_Layout
+
 
 enum CanvasShaderError: Error {
     case notStorageCapable
@@ -39,7 +42,9 @@ enum CanvasShaderError: Error {
 }
 
 @PyClass
-public final class CanvasShader: PyDeserialize {
+public final class CanvasShader: PyDeserialize, @unchecked Sendable {
+    
+    
 
     @PyProperty
     var id: Int = UUID().hashValue

@@ -8,7 +8,7 @@ enum types have to live here in Python).
 
 from enum import IntEnum
 
-from _nucleant.layout import (  # type: ignore
+from ._layout import (  # type: ignore
     NucleantFrame,
     VerticalLayout,
     HorizontalLayout,

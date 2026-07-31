@@ -4,12 +4,12 @@
 //
 import NucleantVulkan
 import PyNucleantBuffer
-import PySwiftKit
+@preconcurrency import PySwiftKit
 import PySerializing
-import PySwiftWrapper
+@preconcurrency import PySwiftWrapper
 import Foundation
-
-
+import PyNucleantUI
+import PNU_Layout
 /// The canvas over a `PyBufferShaderNode`: a fixed-resolution pixel
 /// surface fed straight from Python's buffer protocol, with the same post-
 /// shader slot the other canvases carry.
@@ -33,7 +33,7 @@ import Foundation
 /// the composite pass scales the image to the window. Frame changes are
 /// recorded but don't rebuild anything.
 @PyClass(self_ref: true)
-public final class PyBufferCanvasBase: PyCanvasBase {
+public final class PyBufferCanvasBase: PyCanvasBase, @unchecked Sendable {
 
     public var id: Int = UUID().hashValue
 
@@ -48,7 +48,7 @@ public final class PyBufferCanvasBase: PyCanvasBase {
     /// surface with real subpixels. 1 = the plain direct-copy path.
     public let contentScale: Int
 
-    public typealias Node = PyBufferShaderNode<RenderNode>
+    public typealias Node = PyBufferShaderNode<RenderNode<NucleantFrame>>
     public private(set) var node: Node?
     /// The engine reference is the window's to supply — the one place this
     /// canvas touches NucleantVulkan is installing a compute post shader.

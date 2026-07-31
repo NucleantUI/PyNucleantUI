@@ -4,22 +4,15 @@
 @preconcurrency import PySwiftKit
 import PySerializing
 import PySwiftWrapper
-
+import PyNucleantUI
+import PNU_Layout
 
 import NucleantVulkan
 import Foundation
 import Observation
 
 
-protocol PyWidgetProtocol: WidgetProtocol, PySerializable {
-    var __self__: PyPointer { get }
-}
 
-extension PyWidgetProtocol {
-    public func pyPointer() -> PyPointer {
-        __self__.newRef
-    }
-}
 
 
 
@@ -42,11 +35,11 @@ extension PyWidgetProtocol {
 /// canvas or a scene canvas. Drawing is entirely the canvas's business
 /// (its Python hooks live on the canvas object); assign no canvas and the
 /// widget is a pure container for other widgets.
-public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurrency PyClassProtocol {
+public final class PyWidgetBase: PyWidgetProtocol, PySerializable, PyClassProtocol, @unchecked Sendable {
     
     
 
-    var __self__: PyPointer
+    public var __self__: PyPointer
     
     /// The widget's one and only frame. Defaults to a both-axes flexible
     /// frame, so a widget that never sets one is sized by the layout — it
@@ -62,13 +55,13 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
             _frame = newValue //?? NucleantFrame(flexible: .zero)
             // On a live node canvas, handing the (possibly just-reset) frame
             // down is what triggers the render-node resize.
-            _canvas?.frame = newValue
+            _canvas?.setFrame(newValue)
             // Container size changed → re-place children under any layout.
             runLayout()
         }
     }
 
-    var _canvas: PyCanvasBase?//(any PyCanvasBase)?
+    var _canvas: (any PyCanvasBase)?//(any PyCanvasBase)?
 
     /// Owned reference to `_canvas`'s Python shell. The Swift canvas
     /// instance is owned by its Python object (tp_init stores it, dealloc
@@ -92,18 +85,19 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
         }
         set {
             if newValue == .None {
-                setCanvas(nil)
+                clearCanvas()
                 return
             }
-            let assigned: (any PyCanvasBase)? = switch newValue {
-            case ThorCanvasBase.PyType: try? ThorCanvasBase.casted(unsafe: newValue)
+            //let assigned: (any PyCanvasBase)? =
+            switch newValue {
+            case ThorCanvasBase.PyType: setCanvas(try? ThorCanvasBase.casted(unsafe: newValue))
             //case ThorSceneBase.PyType: try? ThorSceneBase.casted(unsafe: newValue)
-            case PixelBufferCanvasBase.PyType: try? PixelBufferCanvasBase.casted(unsafe: newValue)
-            case PyBufferCanvasBase.PyType: try? PyBufferCanvasBase.casted(unsafe: newValue)
-            case SkiaCanvasBase.PyType: try? SkiaCanvasBase.casted(unsafe: newValue)
-            default: nil
+            case PixelBufferCanvasBase.PyType: setCanvas(try? PixelBufferCanvasBase.casted(unsafe: newValue))
+            case PyBufferCanvasBase.PyType: setCanvas(try? PyBufferCanvasBase.casted(unsafe: newValue))
+            case SkiaCanvasBase.PyType: setCanvas(try? SkiaCanvasBase.casted(unsafe: newValue))
+            default: break
             }
-            setCanvas(assigned)
+            //setCanvas(assigned)
             attachCanvasIfLive()
         }
     }
@@ -167,7 +161,22 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
     /// Single point of canvas replacement: detaches whatever was there,
     /// wires the owner back-pointer, and hands the widget's (or nearest
     /// ancestor's) frame down so the canvas sizes itself from it.
-    private func setCanvas(_ newCanvas: PyCanvasBase?) {
+    private func clearCanvas() {
+        if let old = _canvas {
+            old.detach()
+        }
+        // Keep the Python shell alive alongside the Swift instance — see
+        // `_canvasPyRef`. `pyPointer()` returns +1 (`__self__.newRef`),
+        // taken here while the setter still borrows the object, i.e.
+        // before the caller's temporary can die.
+        _canvasPyRef?.decRef()
+        _canvasPyRef = nil
+        _canvas = nil
+        //newCanvas?.owner = self
+        //newCanvas?.frame = frame
+    }
+    
+    private func setCanvas(_ newCanvas: ThorCanvasBase?) {
         if let old = _canvas, old !== newCanvas {
             old.detach()
         }
@@ -181,6 +190,51 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
         newCanvas?.owner = self
         newCanvas?.frame = frame
     }
+    
+    private func setCanvas(_ newCanvas: SkiaCanvasBase?) {
+        if let old = _canvas, old !== newCanvas {
+            old.detach()
+        }
+        // Keep the Python shell alive alongside the Swift instance — see
+        // `_canvasPyRef`. `pyPointer()` returns +1 (`__self__.newRef`),
+        // taken here while the setter still borrows the object, i.e.
+        // before the caller's temporary can die.
+        _canvasPyRef?.decRef()
+        _canvasPyRef = newCanvas?.pyPointer()
+        _canvas = newCanvas
+        newCanvas?.owner = self
+        newCanvas?.frame = frame
+    }
+    
+    private func setCanvas(_ newCanvas: PixelBufferCanvasBase?) {
+            if let old = _canvas, old !== newCanvas {
+                old.detach()
+            }
+            // Keep the Python shell alive alongside the Swift instance — see
+            // `_canvasPyRef`. `pyPointer()` returns +1 (`__self__.newRef`),
+            // taken here while the setter still borrows the object, i.e.
+            // before the caller's temporary can die.
+            _canvasPyRef?.decRef()
+            _canvasPyRef = newCanvas?.pyPointer()
+            _canvas = newCanvas
+            newCanvas?.owner = self
+            newCanvas?.frame = frame
+        }
+    
+    private func setCanvas(_ newCanvas: PyBufferCanvasBase?) {
+            if let old = _canvas, old !== newCanvas {
+                old.detach()
+            }
+            // Keep the Python shell alive alongside the Swift instance — see
+            // `_canvasPyRef`. `pyPointer()` returns +1 (`__self__.newRef`),
+            // taken here while the setter still borrows the object, i.e.
+            // before the caller's temporary can die.
+            _canvasPyRef?.decRef()
+            _canvasPyRef = newCanvas?.pyPointer()
+            _canvas = newCanvas
+            newCanvas?.owner = self
+            newCanvas?.frame = frame
+        }
 
     /// Attach the current canvas right away when the widget is already in
     /// a live tree — canvases assigned before `attach` wait for it instead.
@@ -210,7 +264,7 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
         activeLayout.recompute()
     }
 
-    func on_render(dt: Double) {
+    public func on_render(dt: Double) {
         for child in children {
             child.on_render(dt: dt)
         }
@@ -265,7 +319,7 @@ public final class PyWidgetBase: PyWidgetProtocol, PySerializable, @preconcurren
         for child in children {
             child.detachTree()
         }
-        setCanvas(nil)
+        clearCanvas()
         parent = nil
         // engine = nil // should we even need to ref to render engine at all in this class ?
         // wgpu = nil // NEVER REF TO WEBGPU OF ANY KIND ON THIS SIDE, IT BELONGS IN RENDERENGINE ONLY

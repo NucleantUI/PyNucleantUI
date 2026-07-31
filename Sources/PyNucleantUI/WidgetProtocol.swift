@@ -2,9 +2,10 @@
 //  WidgetProtocol.swift
 //  ThorUI
 //
+import PySerializing
+import PySwiftKit
 
-
-public protocol WidgetProtocol {
+public protocol WidgetProtocol: AnyObject {
     associatedtype Frame: FrameProtocol
     var frame: Frame? { get }
     
@@ -16,4 +17,14 @@ public protocol WidgetProtocol {
     func remove_widget<W: WidgetProtocol>(widget: W)
     
     func clear_widgets()
+}
+
+public protocol PyWidgetProtocol: WidgetProtocol, PySerializable {
+    var __self__: PyPointer { get }
+}
+
+extension PyWidgetProtocol {
+    public func pyPointer() -> PyPointer {
+        __self__.newRef
+    }
 }

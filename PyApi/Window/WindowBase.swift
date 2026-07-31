@@ -11,6 +11,10 @@ import PySwiftWrapper
 import NucleantApplication
 import NucleantWindow
 import NucleantVulkan
+import PyNucleantUI
+import PNU_App
+import PNU_Layout
+import PNU_Core
 #if os(macOS)
 import AppKit
 import Platform_MacOS
@@ -19,25 +23,28 @@ import Platform_MacOS
 import UIKit
 import Platform_iOS
 #endif
+#if os(Linux)
+import Platform_Linux
+import CVulkan
+#endif
 
-extension PyNucleantUI_Package {
+
+@PyModule
+fileprivate struct window: PyModuleProtocol {
     
-    @PyModule(name: "_nucleant.window")
-    struct Window: PyModuleProtocol {
-        
-        static let py_classes: [any (PyClassProtocol & AnyObject).Type] = [
-            WindowBase.self
-        ]
-        
-    }
+    static let py_classes: [any (PyClassProtocol & AnyObject).Type] = [
+        WindowBase.self
+    ]
+    
 }
+
 
 
 
 @PyClass(
     self_ref: true
 )
-final class WindowBase: NucleantWindow, PyDeserialize {
+final class WindowBase: NucleantWindow, PyDeserialize, @unchecked Sendable {
     
     fileprivate weak var app: PyApp?
     
@@ -69,7 +76,10 @@ final class WindowBase: NucleantWindow, PyDeserialize {
     // UIWindow); only one is in scope per build.
     var platformWindow: PlatformWindow<WindowBase>?
     #endif
-    var renderEngine: VulkanRenderEngine<RenderNode>?
+    #if os(Linux)
+    var platformWindow: PlatformWindow<WindowBase>?
+    #endif
+    var renderEngine: VulkanRenderEngine<RenderNode<NucleantFrame>>?
     var rootWidget: PyWidgetBase?
     
     var win_rect: SIMD4<Int>
@@ -148,6 +158,17 @@ final class WindowBase: NucleantWindow, PyDeserialize {
         platformWindow.title = "Nucleant"
         platformWindow.makeKeyAndOrderFront(nil)
         platformWindow.makeFirstResponder(platformWindow.contentView)
+
+        // 5. Hand Python the initial size. AppKit posts windowDidResize only for
+        //    actual resizes, so without this the Python side never learns how
+        //    big the window is and keeps laying out against whatever default it
+        //    was built with — content ends up sized wrong against a swapchain
+        //    that is already the real dimensions. Going through on_size (rather
+        //    than py_on_size directly) reuses one path for the point→pixel
+        //    scaling, win_rect update and relayout.
+        if let size = platformWindow.contentView?.bounds.size {
+            on_size(w: Double(size.width), h: Double(size.height))
+        }
         #elseif os(iOS)
         // 1. iOS platform window: a UIWindow + root view controller hosting the
         //    CAMetalLayer-backed VulkanView. Its display link is already
@@ -194,9 +215,75 @@ final class WindowBase: NucleantWindow, PyDeserialize {
         if let root {
             RenderBinder.bind(tree: root, into: engine, width: win_rect.z, height: win_rect.w)
         }
-        //py_on_size(w: win_rect.z.scaled(scale), h: win_rect.w.scaled(scale))
         // 4. Show it.
         platformWindow.makeKeyAndVisible()
+
+        // 5. Hand Python the initial size — same reason as macOS: nothing else
+        //    delivers it until the window actually resizes. Pass points and let
+        //    on_size apply contentsScale; win_rect above is already in pixels,
+        //    so scaling it again here would double it.
+        on_size(w: Double(screenBounds.width), h: Double(screenBounds.height))
+        #elseif os(Linux)
+        // 1. Platform window: a Wayland or X11 toplevel, picked by
+        //    LinuxSession.detect() (most desktop Linux is still X11 by
+        //    default). Its frame loop starts immediately in init; it no-ops
+        //    until win_delegate + the engine below are in place (both
+        //    nil-guarded in onFrame), same as macOS's display link / iOS's
+        //    CADisplayLink.
+        let platformWindow = try PlatformWindow<WindowBase>(
+            width:  win_rect.z,
+            height: win_rect.w,
+            title:  "Nucleant"
+        )
+
+        // 2. The Vulkan engine renders into that surface via
+        //    VK_KHR_wayland_surface or VK_KHR_xcb_surface, using whichever
+        //    raw native handles the active backend hands us directly — no
+        //    compositor-specific layer object the way Metal needs one.
+        let getExtent: () -> VkExtent2D = { [weak platformWindow] in
+            VkExtent2D(
+                width:  platformWindow?.bufferWidth ?? 0,
+                height: platformWindow?.bufferHeight ?? 0
+            )
+        }
+        let engine: RenderEngine
+        switch platformWindow.vulkanSurfaceKind {
+        case .wayland(let display, let surface):
+            engine = try RenderEngine(waylandDisplay: display, waylandSurface: surface, getExtent: getExtent)
+        case .xcb(let connection, let window):
+            engine = try RenderEngine(xcbConnection: connection, xcbWindow: window, getExtent: getExtent)
+        }
+        self.renderEngine   = engine
+        self.platformWindow = platformWindow
+        platformWindow.win_delegate = self
+
+        // 3. Build the Python widget tree and bind it into the engine —
+        //    identical to macOS/iOS.
+        let root = try on_build()
+        rootWidget = root
+        if let root = root {
+            if let frame = root.frame {
+                frame.size = .init(Double(win_rect.z), Double(win_rect.w))
+            } else {
+                root.frame = .init(pos: .zero, size: .init(Double(win_rect.z), Double(win_rect.w)))
+            }
+            root.runLayout()
+        }
+        if let root {
+            RenderBinder.bind(tree: root, into: engine, width: win_rect.z, height: win_rect.w)
+        }
+
+        // 4. Show it. A Wayland window only actually appears once its first
+        //    buffer is attached (on the first present), unlike AppKit/UIKit's
+        //    on-demand ordering — this just flushes the connection so the
+        //    surface + frame loop are live before the caller does anything
+        //    else.
+        platformWindow.show()
+
+        // 5. Hand Python the initial size — same reason as macOS/iOS: nothing
+        //    else delivers it until the compositor actually resizes the
+        //    surface. Points, same as waylandSurfaceDidResize's contract.
+        on_size(w: platformWindow.width, h: platformWindow.height)
         #endif
     }
 
@@ -223,7 +310,13 @@ final class WindowBase: NucleantWindow, PyDeserialize {
         // drawable. Scale before touching anything layout/render-facing;
         // py_on_size (the Python hook) keeps the raw point values, same as
         // touch/mouse.
+        #if os(macOS) || os(iOS)
         let scale = Double(platformWindow?.metalLayer.contentsScale ?? 1.0)
+        #elseif os(Linux)
+        let scale = platformWindow?.scale ?? 1.0
+        #else
+        let scale = 1.0
+        #endif
         let pxW = w * scale
         let pxH = h * scale
         win_rect.z = Int(pxW)
@@ -278,5 +371,12 @@ extension WindowBase: WindowBaseDelegate {}
 // `win_delegate` through WindowTouchDelegate, whose default impls
 // (Platform_iOS) forward to our `on_touch_*` Python hooks.
 extension WindowBase: WindowTouchDelegate {}
+#endif
+
+#if os(Linux)
+// Same pattern on Linux: PlatformWindow routes Wayland pointer/keyboard/touch
+// events to its `win_delegate` through WaylandWindowDelegate, whose default
+// impls (Platform_Linux) forward to our `on_*` Python hooks.
+extension WindowBase: WaylandWindowDelegate {}
 #endif
 
