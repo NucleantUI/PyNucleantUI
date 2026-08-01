@@ -43,9 +43,11 @@ public final class PyApp: NucleantApplication, @unchecked Sendable {
     private var _on_start: PyPointer
 
     // Must match the guard on the protocol requirement in
-    // NucleantApplication.swift, which covers Linux too — its AppDelegate is
-    // the plain lifecycle object owning the Wayland event loop.
-    #if os(macOS) || os(iOS) || os(Linux)
+    // NucleantApplication.swift, which covers Linux and Android too — each has
+    // a plain lifecycle AppDelegate rather than a framework one (Linux owns the
+    // Wayland event loop; on Android the Activity owns the looper and the
+    // render loop lives in PlatformWindow).
+    #if os(macOS) || os(iOS) || os(Linux) || os(Android)
     public var appDelegate: AppDelegate<PyApp>?
     #endif
 

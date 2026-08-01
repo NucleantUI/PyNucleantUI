@@ -60,6 +60,39 @@ bundle-libs = [
 # Directories searched in addition to the SwiftPM bin dir, relative to this file.
 # bundle-search-paths = ["../NucleantVulkan/.build/release"]
 
+[tool.pyswiftkit.android]
+# Shared libraries go to .libs/<abi>/ at the wheel root, so they install to
+# site-packages/.libs/<abi>/ — one directory that every Android wheel shipping
+# a native library merges into, and that ksproject moves wholesale into the
+# APK's jniLibs. The merge is the point: one libwgpu_native.so for the whole
+# process, resolved by the loader out of the app's native library dir with no
+# rpath involved. Same convention thorvg-cython already writes.
+#
+# bundle-libs has to be listed explicitly here because Android has no
+# auditwheel and no repair step to do the vendoring, unlike Linux where it is
+# deliberately left unset (see [tool.cibuildwheel.linux] below).
+#
+# Only wgpu-native is listed, and only because nobody else provides it:
+#   * the Nucleant Swift graph (NucleantApplication/Vulkan/Skia/ThorVG) is
+#     linked *into* _nucleant.so — `swift build --product _nucleant` pulls its
+#     target dependencies in, so there are no separate .so files to ship,
+#     unlike macOS where each product is its own dylib.
+#   * libthorvg-1.so ships in the thorvg-cython wheel, whose DT_NEEDED on
+#     libwgpu_native.so is what makes this entry load-bearing.
+#   * Skia is static archives, linked in.
+#   * the Swift runtime and libc++_shared.so are staged into jniLibs by Gradle
+#     from the Swift Android SDK — shipping them here would duplicate them.
+bundle-libs = [
+    "libwgpu_native.so",
+    # Both are DT_NEEDED of _nucleant.so rather than linked in — NucleantVulkan
+    # vendors them as shared objects for Android (no distro to resolve them
+    # from, unlike Linux where they are apt packages).
+    "libshaderc_shared.so",
+    "libspirv-cross-c-shared.so",
+]
+# {abi} is substituted per architecture; vendored deps are laid out per ABI.
+bundle-search-paths = ["../NucleantVulkan/Dependencies/android/{abi}/lib"]
+
 # cibuildwheel builds through `python -m build` + pip, so the backend has to be
 # reachable by pip — hence the git+https reference in [build-system] above rather
 # than a local path. Run it from this directory:
@@ -184,6 +217,28 @@ pkg-config --exists vulkan shaderc spirv-cross-c-shared
 PIP_MODE           = "1"
 SWIFT_BUILD_CONFIG = "release"
 CPATH = "$(python3 -c \"import sysconfig; print(sysconfig.get_path('include'))\")"
+
+[tool.cibuildwheel.android]
+# No repair step, same reasoning as macOS: the vendoring already happened.
+# pyswiftkit-builder stages [tool.pyswiftkit.android] bundle-libs into
+# .libs/<abi>/ and injects it at the wheel root during build_wheel, so there is
+# nothing left to repair — and a repair pass would relocate or rename those
+# entries, breaking the shared site-packages/.libs/<abi>/ that every Android
+# wheel merges into.
+#
+# thorvg-cython does the same thing from the other direction: it has no build
+# backend doing the injection, so it overrides repair-wheel-command to run
+# tools/add_android_libs.py instead. Either way the wheel ends up with
+# .libs/<abi>/lib*.so at the root.
+repair-wheel-command = ""
+
+[tool.cibuildwheel.android.environment]
+PIP_MODE = "1"
+SWIFT_BUILD_CONFIG = "release"
+# Matches [tool.kivy-school.android] min_api in the consuming app, which is
+# pinned at the Swift Android SDK's floor — its artifact bundles carry no
+# triples below android28.
+ANDROID_API_LEVEL = "28"
 
 # Dev-machine override: use the local sibling checkout (with Linux support)
 # instead of the upstream git URL in [build-system].requires — same
