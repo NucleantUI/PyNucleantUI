@@ -27,6 +27,9 @@ import Platform_iOS
 import Platform_Linux
 import CVulkan
 #endif
+#if os(Android)
+import Platform_Android
+#endif
 
 
 @PyModule
@@ -77,6 +80,9 @@ final class WindowBase: NucleantWindow, PyDeserialize, @unchecked Sendable {
     var platformWindow: PlatformWindow<WindowBase>?
     #endif
     #if os(Linux)
+    var platformWindow: PlatformWindow<WindowBase>?
+    #endif
+    #if os(Android)
     var platformWindow: PlatformWindow<WindowBase>?
     #endif
     var renderEngine: VulkanRenderEngine<RenderNode<NucleantFrame>>?
@@ -284,8 +290,61 @@ final class WindowBase: NucleantWindow, PyDeserialize, @unchecked Sendable {
         //    else delivers it until the compositor actually resizes the
         //    surface. Points, same as waylandSurfaceDidResize's contract.
         on_size(w: platformWindow.width, h: platformWindow.height)
+        #elseif os(Android)
+        try androidBringUp()
         #endif
     }
+
+    #if os(Android)
+    /// Android's `PlatformWindow` carries no actor isolation (see the note on
+    /// that type), so Python's `present()` calls straight through from the
+    /// interpreter thread. Both ways of reaching a main actor fail here:
+    /// `DispatchQueue.main.sync` traps because nothing drains the main queue,
+    /// and `MainActor.assumeIsolated` traps because its runtime check finds it
+    /// is not on the main thread.
+    private func androidBringUp() throws {
+        // Android inverts the order the other three use: there is no window to
+        // create and no layer to hand an engine, because the Activity's
+        // SurfaceView already exists before Python starts. PlatformWindow only
+        // binds to it — and binding is what builds the engine, adopts the
+        // surface's size into win_rect and calls on_size. So the engine cannot
+        // be made here; it appears as a side effect of step 3.
+        let platformWindow = PlatformWindow<WindowBase>()
+        platformWindow.win_delegate = self
+        self.platformWindow = platformWindow
+
+        // 1. Build the Python widget tree first, against the requested size.
+        //    Step 3's on_size corrects it to the real surface size, which is
+        //    why this can run before the engine exists.
+        let root = try on_build()
+        rootWidget = root
+        if let root {
+            if let frame = root.frame {
+                frame.size = .init(Double(win_rect.z), Double(win_rect.w))
+            } else {
+                root.frame = .init(pos: .zero, size: .init(Double(win_rect.z), Double(win_rect.w)))
+            }
+            root.runLayout()
+        }
+
+        // 2. Attach to the Activity's surface. Builds the engine, overwrites
+        //    win_rect with the surface's own dimensions, calls on_size (which
+        //    re-lays the tree just built) and starts the render loop.
+        platformWindow.present()
+
+        // 3. Bind against the size the surface actually turned out to be, not
+        //    the one Python asked for. No engine means no surface was ready —
+        //    the loop is already hooked to the host's surface callbacks, but a
+        //    tree bound to a dead engine would draw nothing, so say so.
+        guard let engine = renderEngine else {
+            print("WindowBase: no surface yet — engine unbuilt, nothing bound")
+            return
+        }
+        if let root {
+            RenderBinder.bind(tree: root, into: engine, width: win_rect.z, height: win_rect.w)
+        }
+    }
+    #endif
 
     /// Per display-link tick: Python's frame hook first (game state), then
     /// the tree's render pass (canvases flag dirty / run update hooks), then

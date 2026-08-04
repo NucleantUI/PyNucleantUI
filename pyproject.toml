@@ -54,8 +54,8 @@ bundle-libs = [
     # libNucleantVulkan/libVulkanCore/libNucleantShader load @rpath/MoltenVK.framework
     # and libNucleantThorVG loads @rpath/ThorVG.framework, so both have to travel
     # with the wheel. SwiftPM stages them into its bin dir next to the dylibs.
-    "MoltenVK.framework",
-    "ThorVG.framework",
+    #"MoltenVK.framework",
+    #"ThorVG.framework",
 ]
 # Directories searched in addition to the SwiftPM bin dir, relative to this file.
 # bundle-search-paths = ["../NucleantVulkan/.build/release"]
@@ -91,7 +91,14 @@ bundle-libs = [
     "libspirv-cross-c-shared.so",
 ]
 # {abi} is substituted per architecture; vendored deps are laid out per ABI.
-bundle-search-paths = ["../NucleantVulkan/Dependencies/android/{abi}/lib"]
+# Both forms of the same dependency: Package.swift's `nucleantDev` switch takes
+# NucleantVulkan from the sibling checkout or from its GitHub URL, and only the
+# second lands under .build/checkouts. Missing directories are skipped, so
+# listing both covers either mode.
+bundle-search-paths = [
+    "../NucleantVulkan/Dependencies/android/{abi}/lib",
+    ".build/checkouts/NucleantVulkan/Dependencies/android/{abi}/lib",
+]
 
 # cibuildwheel builds through `python -m build` + pip, so the backend has to be
 # reachable by pip — hence the git+https reference in [build-system] above rather

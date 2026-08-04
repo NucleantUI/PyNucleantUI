@@ -73,6 +73,16 @@ public final class PyApp: NucleantApplication, @unchecked Sendable {
         // has to be reached explicitly through the delegate `setup()` already
         // built.
         try appDelegate?.run()
+        #elseif os(Android)
+        // Same shadowing as Linux — the @PyMethod `run()` hides the protocol
+        // extension's, so the delegate is reached explicitly. Unlike every
+        // other platform this does not block: App+Android's run() fires
+        // onStart() and returns, because the Activity owns the UI thread and
+        // the main looper while each PlatformWindow owns its own render loop.
+        // Keeping the app alive past this point is therefore the caller's
+        // business, not run()'s — the interpreter thread returning is what
+        // ends the app.
+        appDelegate?.run()
         #endif
     }
     
