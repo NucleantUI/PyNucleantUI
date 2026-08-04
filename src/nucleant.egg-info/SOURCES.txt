@@ -1,8 +1,8 @@
 pyproject.toml
 src/nucleant/__init__.py
-src/nucleant/_nucleant.so
 src/nucleant/app.pyi
 src/nucleant/canvas.pyi
+src/nucleant/core.so
 src/nucleant/layout.py
 src/nucleant/layout.pyi
 src/nucleant/widget.pyi

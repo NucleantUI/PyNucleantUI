@@ -27,7 +27,7 @@ from importlib.machinery import ModuleSpec as _ModuleSpec
 # on purpose: it is the pure-Python wrapper in layout.py over native `_layout`.
 _NATIVE_MODULES = frozenset({"app", "canvas", "widget", "window", "_layout"})
 
-_NATIVE_LIB = _os.path.join(_os.path.dirname(__file__), "_nucleant.so")
+_NATIVE_LIB = _os.path.join(_os.path.dirname(__file__), "core.so")
 
 _PREFIX = __name__ + "."
 

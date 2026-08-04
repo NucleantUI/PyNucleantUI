@@ -253,7 +253,7 @@ func pyModules() -> [Product] {
         // the module names at it.
         products.append(
             .library(
-                name: "_nucleant",
+                name: "core",
                 type: .dynamic,
                 targets: ["PNU_App", "PNU_Canvas", "PNU_Core", "PNU_Layout", "PNU_Widget", "PNU_Window"]
             )

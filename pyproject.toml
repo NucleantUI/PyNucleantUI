@@ -27,7 +27,7 @@ source-dir = "src/nucleant"           # Python packages live under src/<name>/
 # breaks Swift type identity across them). The five PyInit_* entry points all
 # live in this one file; nucleant/__init__.py maps the module names onto it.
 products = [
-    "_nucleant"
+    "core"
 ]
 
 # Per-platform overrides. Filenames are platform-specific — .dylib/.framework
@@ -38,24 +38,26 @@ products = [
 # found fails the build rather than shipping a wheel that is quietly missing it.
 # libPySwiftKit is deliberately absent: it ships in the pyswiftkit wheel and is
 # reached through the @loader_path/../pyswiftkit rpath.
-# libNucleantApplication.dylib is the whole NucleantApplication package in one
-# image — NucleantWindow and Platform_MacOS/Platform_iOS are targets inside it,
-# not separate dylibs. Listing them separately is what put two copies of each
+#
+# This is the whole @rpath closure of _nucleant.so, and it is short because
+# most of the graph is linked *into* it: NucleantVulkan, VulkanCore,
+# NucleantShader, NucleantSkia and NucleantThorVG are `.automatic` products, so
+# they are static archives here, not dylibs — the same shape Android has. Only
+# NucleantApplication is its own image, and it is the whole package in one:
+# NucleantWindow and Platform_MacOS/Platform_iOS are targets inside it, not
+# separate dylibs. Listing those separately is what put two copies of each
 # module in the process and broke generic metadata lookup for
 # PlatformWindow<WindowBase>; see that package's Package.swift.
+#
+# MoltenVK and ThorVG are the bare-dylib forms, not the .framework bundles —
+# PIP_MODE makes NucleantVulkan and NucleantThorVG link *_lib.xcframework, so
+# the install names are @rpath/libMoltenVK.dylib and @rpath/libthorvg-1.dylib.
+# Framework bundles are for Xcode embed mode; a wheel just needs the file.
 bundle-libs = [
-    "libNucleantApplication.dylib",
-    "libNucleantShader.dylib",
-    "libNucleantSkia.dylib",
-    "libNucleantThorVG.dylib",
-    "libNucleantVulkan.dylib",
-    "libVulkanCore.dylib",
+    #"libNucleantApplication.dylib",
+    "libMoltenVK.dylib",
+    "libthorvg-1.dylib",
     "libwgpu_native.dylib",
-    # libNucleantVulkan/libVulkanCore/libNucleantShader load @rpath/MoltenVK.framework
-    # and libNucleantThorVG loads @rpath/ThorVG.framework, so both have to travel
-    # with the wheel. SwiftPM stages them into its bin dir next to the dylibs.
-    #"MoltenVK.framework",
-    #"ThorVG.framework",
 ]
 # Directories searched in addition to the SwiftPM bin dir, relative to this file.
 # bundle-search-paths = ["../NucleantVulkan/.build/release"]
