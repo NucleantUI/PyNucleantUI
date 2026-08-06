@@ -84,6 +84,14 @@ bundle-libs = [
 #   * Skia is static archives, linked in.
 #   * the Swift runtime and libc++_shared.so are staged into jniLibs by Gradle
 #     from the Swift Android SDK — shipping them here would duplicate them.
+#   * libPySwiftKit.so is the one exception to "linked in": unlike
+#     NucleantApplication/Vulkan/Skia/ThorVG, SwiftPM keeps it a separate
+#     DT_NEEDED of _nucleant.so rather than folding it in — confirmed via
+#     readelf -d, and it lands right in the SwiftPM release dir this function
+#     already searches first, so no bundle-search-paths entry is needed for
+#     it. Without this, core.so's dlopen fails with "library libPySwiftKit.so
+#     not found" — the pyswiftkit wheel's own copy lives in a different
+#     package's site-packages dir, unreachable via core.so's $ORIGIN RUNPATH.
 bundle-libs = [
     "libwgpu_native.so",
     # Both are DT_NEEDED of _nucleant.so rather than linked in — NucleantVulkan
@@ -91,6 +99,7 @@ bundle-libs = [
     # from, unlike Linux where they are apt packages).
     "libshaderc_shared.so",
     "libspirv-cross-c-shared.so",
+    "libPySwiftKit.so",
 ]
 # {abi} is substituted per architecture; vendored deps are laid out per ABI.
 # Both forms of the same dependency: Package.swift's `nucleantDev` switch takes
@@ -108,6 +117,9 @@ bundle-search-paths = [
 #   cibuildwheel --platform macos --output-dir ./wheelhouse
 #   cibuildwheel --platform linux --output-dir ./wheelhouse
 [tool.cibuildwheel]
+# Only 3.13 for now — 3.14/3.15 aren't needed yet, and each extra minor is
+# another full Swift build per platform.
+build = "cp313-*"
 # Swift has no musl toolchain, so musllinux cannot be built at all.
 skip = ["*-musllinux*"]
 

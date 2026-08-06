@@ -88,6 +88,26 @@ public final class RenderNode<Frame: FrameProtocol & AnyObject>: RenderContainer
         case .py_buffer(let node): node.imageView
         }
     }
+
+    /// Only for a window-filling slot: `frame` is never actually `nil` — a
+    /// widget's default (`PyWidgetBase._frame`) is a real, both-axes-flexible
+    /// `NucleantFrame(flexible: .zero)`, not a null case, so a canvas that
+    /// never had an explicit size still carries one of these. Flexible is
+    /// the real "no explicit size" signal (matches `compositeRect`'s own
+    /// z/w > 0 check falling through to fullscreen for the same frame). A
+    /// slot with a genuinely fixed frame is left alone — its own frame is
+    /// what should govern its size.
+    public func resizeToFitWindow(width: Int, height: Int, engine: Engine) {
+        guard frame == nil || (frame!.flexibleWidth && frame!.flexibleHeight) else { return }
+        switch context {
+        case .thor(let node):
+            engine.resizeThorNode(node, id: id, width: width, height: height)
+        case .skia, .pixel_buffer, .py_buffer:
+            // Content-sized by design (source resolution × scale, or the
+            // producer's own buffer), not window-sized — nothing to do here.
+            break
+        }
+    }
 }
 
 

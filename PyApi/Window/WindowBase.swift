@@ -329,20 +329,25 @@ final class WindowBase: NucleantWindow, PyDeserialize, @unchecked Sendable {
 
         // 2. Attach to the Activity's surface. Builds the engine, overwrites
         //    win_rect with the surface's own dimensions, calls on_size (which
-        //    re-lays the tree just built) and starts the render loop.
+        //    re-lays the tree just built) and, since this is the first time
+        //    `renderEngine` goes from nil to non-nil, triggers
+        //    `on_surface_recreated()` below — which does the actual bind. If
+        //    no surface exists yet, present() finds nothing and does none of
+        //    that; the same callback fires later once the surface the loop is
+        //    already listening for shows up.
         platformWindow.present()
+    }
 
-        // 3. Bind against the size the surface actually turned out to be, not
-        //    the one Python asked for. No engine means no surface was ready —
-        //    the loop is already hooked to the host's surface callbacks, but a
-        //    tree bound to a dead engine would draw nothing, so say so.
-        guard let engine = renderEngine else {
-            print("WindowBase: no surface yet — engine unbuilt, nothing bound")
-            return
-        }
-        if let root {
-            RenderBinder.bind(tree: root, into: engine, width: win_rect.z, height: win_rect.w)
-        }
+    /// Called whenever `PlatformWindow` hands `renderEngine` a fresh instance
+    /// built against a new native window — the first time (from `present()`
+    /// above, completing bring-up) and every time after (the old window is
+    /// gone, e.g. after minimize/resume tore the Activity's Surface down), so
+    /// the render nodes bound into whatever engine existed before, if any,
+    /// are gone with it. Bind the current tree into the new one — a plain
+    /// resize never reaches here, on_size handles that in place.
+    func on_surface_recreated() {
+        guard let engine = renderEngine, let rootWidget else { return }
+        RenderBinder.bind(tree: rootWidget, into: engine, width: win_rect.z, height: win_rect.w)
     }
     #endif
 

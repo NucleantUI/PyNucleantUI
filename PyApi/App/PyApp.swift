@@ -79,9 +79,12 @@ public final class PyApp: NucleantApplication, @unchecked Sendable {
         // other platform this does not block: App+Android's run() fires
         // onStart() and returns, because the Activity owns the UI thread and
         // the main looper while each PlatformWindow owns its own render loop.
-        // Keeping the app alive past this point is therefore the caller's
-        // business, not run()'s — the interpreter thread returning is what
-        // ends the app.
+        // See App+Android.swift's `run()` for why keeping the app alive past
+        // this point belongs to the bootstrap (NucleantLauncher.run, Swift
+        // side) instead — a @PyMethod call is the wrong place for a
+        // long-lived block, since it would hold the interpreter's GIL the
+        // whole time and starve the render thread's own per-frame callbacks
+        // back into Python.
         appDelegate?.run()
         #endif
     }
